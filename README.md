@@ -42,7 +42,7 @@ Download and run the installer script.
 The script installs Node.js if it is not already present, then runs the guided onboard wizard to create a sandbox, configure inference, and apply security policies.
 
 ```console
-$ git clone https://github.com/NVIDIA/openshell-openclaw-plugin.git
+$ git clone https://github.com/NVIDIA/NemoClaw.git
 $ cd openshell-openclaw-plugin
 $ ./install.sh
 ```
