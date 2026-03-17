@@ -10,7 +10,9 @@ const { prompt, ensureApiKey, getCredential } = require("./credentials");
 const registry = require("./registry");
 const nim = require("./nim");
 const policies = require("./policies");
+const { checkCgroupConfig } = require("./preflight");
 const HOST_GATEWAY_URL = "http://host.openshell.internal";
+const EXPERIMENTAL = process.env.NEMOCLAW_EXPERIMENTAL === "1";
 
 // ── Helpers ──────────────────────────────────────────────────────
 
@@ -67,6 +69,27 @@ async function preflight() {
   }
   console.log(`  ✓ openshell CLI: ${runCapture("openshell --version 2>/dev/null || echo unknown", { ignoreError: true })}`);
 
+  // cgroup v2 + Docker cgroupns
+  const cgroup = checkCgroupConfig();
+  if (!cgroup.ok) {
+    console.error("");
+    console.error("  !! cgroup v2 detected but Docker is not configured for cgroupns=host.");
+    console.error("     OpenShell's gateway runs k3s inside Docker, which will fail with:");
+    console.error("");
+    console.error("       openat2 /sys/fs/cgroup/kubepods/pids.max: no such file or directory");
+    console.error("");
+    console.error("     To fix, run:");
+    console.error("");
+    console.error("       nemoclaw setup-spark");
+    console.error("");
+    console.error("     This adds \"default-cgroupns-mode\": \"host\" to /etc/docker/daemon.json");
+    console.error("     (preserving any existing settings) and restarts Docker.");
+    console.error("");
+    console.error(`     Detail: ${cgroup.reason}`);
+    process.exit(1);
+  }
+  console.log("  ✓ cgroup configuration OK");
+
   // GPU
   const gpu = nim.detectGpu();
   if (gpu && gpu.type === "nvidia") {
@@ -109,8 +132,12 @@ async function startGateway(gpu) {
   }
 
   // CoreDNS fix — always run. k3s-inside-Docker has broken DNS on all platforms.
-  const colimaSocket = path.join(process.env.HOME || "/tmp", ".colima/default/docker.sock");
-  if (fs.existsSync(colimaSocket)) {
+  const home = process.env.HOME || "/tmp";
+  const colimaSocket = [
+    path.join(home, ".colima/default/docker.sock"),
+    path.join(home, ".config/colima/default/docker.sock"),
+  ].find((s) => fs.existsSync(s));
+  if (colimaSocket) {
     console.log("  Patching CoreDNS for Colima...");
     run(`bash "${path.join(SCRIPTS, "fix-coredns.sh")}" 2>&1 || true`, { ignoreError: true });
   }
@@ -197,38 +224,40 @@ async function setupNim(sandboxName, gpu) {
   const ollamaRunning = !!runCapture("curl -sf http://localhost:11434/api/tags 2>/dev/null", { ignoreError: true });
   const vllmRunning = !!runCapture("curl -sf http://localhost:8000/v1/models 2>/dev/null", { ignoreError: true });
 
-  // Auto-select if a local inference engine is already running
-  if (vllmRunning) {
-    console.log("  ✓ vLLM detected on localhost:8000 — using it");
-    provider = "vllm-local";
-    model = "vllm-local";
-    registry.updateSandbox(sandboxName, { model, provider, nimContainer });
-    return { model, provider };
-  }
-  if (ollamaRunning) {
-    console.log("  ✓ Ollama detected on localhost:11434 — using it");
-    provider = "ollama-local";
-    model = "nemotron-3-nano";
-    registry.updateSandbox(sandboxName, { model, provider, nimContainer });
-    return { model, provider };
+  // Auto-select only with NEMOCLAW_EXPERIMENTAL=1 (prevents silent misconfiguration)
+  if (EXPERIMENTAL) {
+    if (vllmRunning) {
+      console.log("  ✓ vLLM detected on localhost:8000 — using it [experimental]");
+      provider = "vllm-local";
+      model = "vllm-local";
+      registry.updateSandbox(sandboxName, { model, provider, nimContainer });
+      return { model, provider };
+    }
+    if (ollamaRunning) {
+      console.log("  ✓ Ollama detected on localhost:11434 — using it [experimental]");
+      provider = "ollama-local";
+      model = "nemotron-3-nano";
+      registry.updateSandbox(sandboxName, { model, provider, nimContainer });
+      return { model, provider };
+    }
   }
 
-  // Build options list dynamically
+  // Build options list — always show local options but label as experimental
   const options = [];
   if (gpu && gpu.nimCapable) {
-    options.push({ key: "nim", label: "Local NIM container (NVIDIA GPU)" });
+    options.push({ key: "nim", label: "Local NIM container (NVIDIA GPU) [experimental]" });
   }
   options.push({ key: "cloud", label: "NVIDIA Cloud API (build.nvidia.com)" });
   if (hasOllama || ollamaRunning) {
-    options.push({ key: "ollama", label: `Local Ollama (localhost:11434)${ollamaRunning ? " — running" : ""}` });
+    options.push({ key: "ollama", label: `Local Ollama (localhost:11434)${ollamaRunning ? " — running" : ""} [experimental]` });
   }
   if (vllmRunning) {
-    options.push({ key: "vllm", label: "Existing vLLM instance (localhost:8000) — running" });
+    options.push({ key: "vllm", label: "Existing vLLM instance (localhost:8000) — running [experimental]" });
   }
 
   // On macOS without Ollama, offer to install it
   if (!hasOllama && process.platform === "darwin") {
-    options.push({ key: "install-ollama", label: "Install Ollama (recommended for macOS)" });
+    options.push({ key: "install-ollama", label: "Install Ollama (macOS) [experimental]" });
   }
 
   if (options.length > 1) {
@@ -445,7 +474,7 @@ function printDashboard(sandboxName, model, provider) {
 
   console.log("");
   console.log(`  ${"─".repeat(50)}`);
-  console.log(`  Dashboard    http://localhost:18789/`);
+  // console.log(`  Dashboard    http://localhost:18789/`);
   console.log(`  Sandbox      ${sandboxName} (Landlock + seccomp + netns)`);
   console.log(`  Model        ${model} (${providerLabel})`);
   console.log(`  NIM          ${nimLabel}`);
