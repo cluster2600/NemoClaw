@@ -151,7 +151,7 @@ async function deploy(instanceName) {
   process.stdout.write(`  Waiting for SSH `);
   for (let i = 0; i < 60; i++) {
     try {
-      execFileSync("ssh", ["-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=no", name, "echo", "ok"], { encoding: "utf-8", stdio: "ignore" });
+      execFileSync("ssh", ["-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=accept-new", name, "echo", "ok"], { encoding: "utf-8", stdio: "ignore" });
       process.stdout.write(` ${G}✓${R}\n`);
       break;
     } catch {
@@ -166,8 +166,8 @@ async function deploy(instanceName) {
   }
 
   console.log("  Syncing NemoClaw to VM...");
-  run(`ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR ${qname} 'mkdir -p /home/ubuntu/nemoclaw'`);
-  run(`rsync -az --delete --exclude node_modules --exclude .git --exclude src -e "ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR" "${ROOT}/scripts" "${ROOT}/Dockerfile" "${ROOT}/nemoclaw" "${ROOT}/nemoclaw-blueprint" "${ROOT}/bin" "${ROOT}/package.json" ${qname}:/home/ubuntu/nemoclaw/`);
+  run(`ssh -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${qname} 'mkdir -p /home/ubuntu/nemoclaw'`);
+  run(`rsync -az --delete --exclude node_modules --exclude .git --exclude src -e "ssh -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR" "${ROOT}/scripts" "${ROOT}/Dockerfile" "${ROOT}/nemoclaw" "${ROOT}/nemoclaw-blueprint" "${ROOT}/bin" "${ROOT}/package.json" ${qname}:/home/ubuntu/nemoclaw/`);
 
   const envLines = [`NVIDIA_API_KEY=${shellQuote(process.env.NVIDIA_API_KEY || "")}`];
   const ghToken = process.env.GITHUB_TOKEN;
@@ -182,24 +182,24 @@ async function deploy(instanceName) {
   const envTmp = path.join(envDir, "env");
   fs.writeFileSync(envTmp, envLines.join("\n") + "\n", { mode: 0o600 });
   try {
-    run(`scp -q -o StrictHostKeyChecking=no -o LogLevel=ERROR ${shellQuote(envTmp)} ${qname}:/home/ubuntu/nemoclaw/.env`);
+    run(`scp -q -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${shellQuote(envTmp)} ${qname}:/home/ubuntu/nemoclaw/.env`);
   } finally {
     try { fs.unlinkSync(envTmp); } catch {}
     try { fs.rmdirSync(envDir); } catch {}
   }
 
   console.log("  Running setup...");
-  runInteractive(`ssh -t -o StrictHostKeyChecking=no -o LogLevel=ERROR ${qname} 'cd /home/ubuntu/nemoclaw && set -a && . .env && set +a && bash scripts/brev-setup.sh'`);
+  runInteractive(`ssh -t -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${qname} 'cd /home/ubuntu/nemoclaw && set -a && . .env && set +a && bash scripts/brev-setup.sh'`);
 
   if (tgToken) {
     console.log("  Starting services...");
-    run(`ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR ${qname} 'cd /home/ubuntu/nemoclaw && set -a && . .env && set +a && bash scripts/start-services.sh'`);
+    run(`ssh -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${qname} 'cd /home/ubuntu/nemoclaw && set -a && . .env && set +a && bash scripts/start-services.sh'`);
   }
 
   console.log("");
   console.log("  Connecting to sandbox...");
   console.log("");
-  runInteractive(`ssh -t -o StrictHostKeyChecking=no -o LogLevel=ERROR ${qname} 'cd /home/ubuntu/nemoclaw && set -a && . .env && set +a && openshell sandbox connect nemoclaw'`);
+  runInteractive(`ssh -t -o StrictHostKeyChecking=accept-new -o LogLevel=ERROR ${qname} 'cd /home/ubuntu/nemoclaw && set -a && . .env && set +a && openshell sandbox connect nemoclaw'`);
 }
 
 async function start() {
