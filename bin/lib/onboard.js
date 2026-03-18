@@ -39,6 +39,10 @@ function shellQuote(value) {
   return `'${String(value).replace(/'/g, `'\\''`)}'`;
 }
 
+function pythonLiteralJson(value) {
+  return JSON.stringify(JSON.stringify(value));
+}
+
 function buildSandboxConfigSyncScript(selectionConfig) {
   const providerType =
     selectionConfig.profile === "inference-local"
@@ -86,7 +90,7 @@ cfg.setdefault('agents', {}).setdefault('defaults', {}).setdefault('model', {})[
 models_cfg = cfg.setdefault('models', {})
 models_cfg.setdefault('mode', 'merge')
 providers_cfg = models_cfg.setdefault('providers', {})
-providers_cfg[${JSON.stringify(providerKey)}] = ${JSON.stringify(providerConfig)}
+providers_cfg[${JSON.stringify(providerKey)}] = json.loads(${pythonLiteralJson(providerConfig)})
 
 with open(cfg_path, 'w') as f:
     json.dump(cfg, f, indent=2)

@@ -24,7 +24,7 @@ describe("onboard helpers", () => {
     assert.match(script, /openclaw models set 'inference\/nemotron-3-nano:30b'/);
     assert.match(script, /cfg\.setdefault\('agents', \{\}\)\.setdefault\('defaults', \{\}\)\.setdefault\('model', \{\}\)\['primary'\]/);
     assert.match(script, /providers_cfg\["inference"\]/);
-    assert.match(script, /"apiKey":"unused"/);
+    assert.match(script, /json\.loads\("\{\\\"baseUrl\\\":\\\"https:\/\/inference\.local\/v1\\\",\\\"apiKey\\\":\\\"unused\\\"/);
     assert.match(script, /inference\/nemotron-3-nano:30b/);
     assert.match(script, /^exit$/m);
   });
