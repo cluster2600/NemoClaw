@@ -146,5 +146,37 @@ describe("policies", () => {
         assert.ok(content.includes("network_policies:"), `${p.name} missing network_policies`);
       }
     });
+
+    it("every preset has a binaries section (ref: #676)", () => {
+      for (const p of policies.listPresets()) {
+        const content = policies.loadPreset(p.name);
+        assert.ok(
+          content.includes("binaries:"),
+          `${p.name} missing binaries section — policies without binaries return 403`
+        );
+      }
+    });
+
+    it("every preset binaries section includes openclaw", () => {
+      for (const p of policies.listPresets()) {
+        const content = policies.loadPreset(p.name);
+        assert.ok(
+          content.includes("/usr/local/bin/openclaw"),
+          `${p.name} must allow openclaw binary`
+        );
+      }
+    });
+
+    it("package manager presets include their tool binaries", () => {
+      const npmContent = policies.loadPreset("npm");
+      assert.ok(npmContent.includes("/usr/local/bin/npm"), "npm preset must allow npm binary");
+      assert.ok(npmContent.includes("/usr/local/bin/node"), "npm preset must allow node binary");
+
+      const pypiContent = policies.loadPreset("pypi");
+      assert.ok(pypiContent.includes("/usr/bin/pip"), "pypi preset must allow pip binary");
+
+      const dockerContent = policies.loadPreset("docker");
+      assert.ok(dockerContent.includes("/usr/bin/docker"), "docker preset must allow docker binary");
+    });
   });
 });
