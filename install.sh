@@ -182,6 +182,48 @@ spin() {
 
 command_exists() { command -v "$1" &>/dev/null; }
 
+# ---------------------------------------------------------------------------
+# download_and_verify — download a script to a temp file and verify its
+# SHA-256 digest before execution.  Returns the temp-file path on stdout.
+#
+#   Usage:  local tmp; tmp="$(download_and_verify URL EXPECTED_SHA256 LABEL)"
+#           bash "$tmp"; rm -f "$tmp"
+#
+# If no SHA-256 tool is available, a warning is printed and execution is
+# allowed (same behaviour as the nvm installer check).
+# Set NEMOCLAW_SKIP_INTEGRITY=1 to bypass verification (CI / air-gapped).
+# ---------------------------------------------------------------------------
+download_and_verify() {
+  local url="$1" expected_hash="$2" label="$3"
+  local tmp
+  tmp="$(mktemp)"
+  curl -fsSL "$url" -o "$tmp" \
+    || { rm -f "$tmp"; error "Failed to download $label"; }
+
+  if [[ "${NEMOCLAW_SKIP_INTEGRITY:-}" == "1" ]]; then
+    warn "Integrity check skipped for $label (NEMOCLAW_SKIP_INTEGRITY=1)" >&2
+    printf "%s" "$tmp"
+    return
+  fi
+
+  local actual_hash
+  if command_exists sha256sum; then
+    actual_hash="$(sha256sum "$tmp" | awk '{print $1}')"
+  elif command_exists shasum; then
+    actual_hash="$(shasum -a 256 "$tmp" | awk '{print $1}')"
+  else
+    warn "No SHA-256 tool found — skipping $label integrity check" >&2
+    printf "%s" "$tmp"
+    return
+  fi
+  if [[ "$actual_hash" != "$expected_hash" ]]; then
+    rm -f "$tmp"
+    error "$label integrity check failed (update hash if upstream released a new version)\n  Expected: $expected_hash\n  Actual:   $actual_hash"
+  fi
+  info "$label integrity verified" >&2
+  printf "%s" "$tmp"
+}
+
 MIN_NODE_MAJOR=20
 MIN_NPM_MAJOR=10
 RECOMMENDED_NODE_MAJOR=22
@@ -286,23 +328,9 @@ install_nodejs() {
   local NVM_VERSION="v0.40.4"
   local NVM_SHA256="4b7412c49960c7d31e8df72da90c1fb5b8cccb419ac99537b737028d497aba4f"
   local nvm_tmp
-  nvm_tmp="$(mktemp)"
-  curl -fsSL "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" -o "$nvm_tmp" \
-    || { rm -f "$nvm_tmp"; error "Failed to download nvm installer"; }
-  local actual_hash
-  if command_exists sha256sum; then
-    actual_hash="$(sha256sum "$nvm_tmp" | awk '{print $1}')"
-  elif command_exists shasum; then
-    actual_hash="$(shasum -a 256 "$nvm_tmp" | awk '{print $1}')"
-  else
-    warn "No SHA-256 tool found — skipping nvm integrity check"
-    actual_hash="$NVM_SHA256"  # allow execution
-  fi
-  if [[ "$actual_hash" != "$NVM_SHA256" ]]; then
-    rm -f "$nvm_tmp"
-    error "nvm installer integrity check failed\n  Expected: $NVM_SHA256\n  Actual:   $actual_hash"
-  fi
-  info "nvm installer integrity verified"
+  nvm_tmp="$(download_and_verify \
+    "https://raw.githubusercontent.com/nvm-sh/nvm/${NVM_VERSION}/install.sh" \
+    "$NVM_SHA256" "nvm installer")"
   spin "Installing nvm..." bash "$nvm_tmp"
   rm -f "$nvm_tmp"
   ensure_nvm_loaded
@@ -348,6 +376,10 @@ get_vram_mb() {
 }
 
 install_or_upgrade_ollama() {
+  # IMPORTANT: update OLLAMA_INSTALL_SHA256 when the upstream installer changes.
+  # Compute with:  curl -fsSL https://ollama.com/install.sh | sha256sum
+  local OLLAMA_INSTALL_SHA256="25f64b810b947145095956533e1bdf56eacea2673c55a7e586be4515fc882c9f"
+
   if detect_gpu && command_exists ollama; then
     local current
     current=$(get_ollama_version)
@@ -355,14 +387,22 @@ install_or_upgrade_ollama() {
       info "Ollama v${current} meets minimum requirement (>= v${OLLAMA_MIN_VERSION})"
     else
       info "Ollama v${current:-unknown} is below v${OLLAMA_MIN_VERSION} — upgrading…"
-      curl -fsSL https://ollama.com/install.sh | sh
+      local ollama_tmp
+      ollama_tmp="$(download_and_verify "https://ollama.com/install.sh" \
+        "$OLLAMA_INSTALL_SHA256" "Ollama installer")"
+      sh "$ollama_tmp"
+      rm -f "$ollama_tmp"
       info "Ollama upgraded to $(get_ollama_version)"
     fi
   else
     # No ollama — only install if a GPU is present
     if detect_gpu; then
       info "GPU detected — installing Ollama…"
-      curl -fsSL https://ollama.com/install.sh | sh
+      local ollama_tmp
+      ollama_tmp="$(download_and_verify "https://ollama.com/install.sh" \
+        "$OLLAMA_INSTALL_SHA256" "Ollama installer")"
+      sh "$ollama_tmp"
+      rm -f "$ollama_tmp"
       info "Ollama installed: v$(get_ollama_version)"
     else
       warn "No GPU detected — skipping Ollama installation."

@@ -33,10 +33,52 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 export NEEDRESTART_MODE=a
 export DEBIAN_FRONTEND=noninteractive
 
+# ---------------------------------------------------------------------------
+# download_and_verify — download a script to a temp file and verify its
+# SHA-256 digest before execution.  Prints the temp-file path on stdout.
+# Set NEMOCLAW_SKIP_INTEGRITY=1 to bypass verification (CI / air-gapped).
+# ---------------------------------------------------------------------------
+download_and_verify() {
+  local url="$1" expected_hash="$2" label="$3"
+  local tmp
+  tmp="$(mktemp)"
+  curl -fsSL "$url" -o "$tmp" \
+    || { rm -f "$tmp"; fail "Failed to download $label"; }
+
+  if [ "${NEMOCLAW_SKIP_INTEGRITY:-}" = "1" ]; then
+    warn "Integrity check skipped for $label (NEMOCLAW_SKIP_INTEGRITY=1)" >&2
+    printf "%s" "$tmp"
+    return
+  fi
+
+  local actual_hash=""
+  if command -v sha256sum > /dev/null 2>&1; then
+    actual_hash="$(sha256sum "$tmp" | awk '{print $1}')"
+  elif command -v shasum > /dev/null 2>&1; then
+    actual_hash="$(shasum -a 256 "$tmp" | awk '{print $1}')"
+  else
+    warn "No SHA-256 tool found — skipping $label integrity check" >&2
+    printf "%s" "$tmp"
+    return
+  fi
+  if [ "$actual_hash" != "$expected_hash" ]; then
+    rm -f "$tmp"
+    fail "$label integrity check failed (update hash if upstream released a new version). Expected: $expected_hash  Actual: $actual_hash"
+  fi
+  info "$label integrity verified" >&2
+  printf "%s" "$tmp"
+}
+
 # --- 0. Node.js (needed for services) ---
 if ! command -v node > /dev/null 2>&1; then
   info "Installing Node.js..."
-  curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash - > /dev/null 2>&1
+  # IMPORTANT: update NODESOURCE_SHA256 when NodeSource updates their setup script.
+  # Compute with:  curl -fsSL https://deb.nodesource.com/setup_22.x | sha256sum
+  NODESOURCE_SHA256="575583bbac2fccc0b5edd0dbc03e222d9f9dc8d724da996d22754d6411104fd1"
+  ns_tmp="$(download_and_verify "https://deb.nodesource.com/setup_22.x" \
+    "$NODESOURCE_SHA256" "NodeSource setup")"
+  sudo -E bash "$ns_tmp" > /dev/null 2>&1
+  rm -f "$ns_tmp"
   sudo apt-get install -y -qq nodejs > /dev/null 2>&1
   info "Node.js $(node --version) installed"
 else
