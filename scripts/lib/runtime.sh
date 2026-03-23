@@ -138,6 +138,19 @@ get_colima_vm_nameserver() {
   first_non_loopback_nameserver "$resolv_conf"
 }
 
+get_systemd_resolved_upstream() {
+  # On systemd-resolved systems, /etc/resolv.conf points to the stub
+  # resolver at 127.0.0.53 which is loopback. The real upstream nameservers
+  # are in /run/systemd/resolve/resolv.conf.
+  # Ref: https://github.com/NVIDIA/NemoClaw/issues/744
+  local resolved_conf="${NEMOCLAW_RESOLVED_CONF:-/run/systemd/resolve/resolv.conf}"
+  if [ -f "$resolved_conf" ]; then
+    first_non_loopback_nameserver "$(cat "$resolved_conf" 2>/dev/null || true)"
+    return $?
+  fi
+  return 1
+}
+
 resolve_coredns_upstream() {
   local container_resolv_conf="${1:-}"
   local host_resolv_conf="${2:-}"
@@ -159,6 +172,15 @@ resolve_coredns_upstream() {
   fi
 
   nameserver="$(first_non_loopback_nameserver "$host_resolv_conf" || true)"
+  if [ -n "$nameserver" ]; then
+    printf '%s\n' "$nameserver"
+    return 0
+  fi
+
+  # Fallback: systemd-resolved stub (127.0.0.53) — read real upstreams
+  # from /run/systemd/resolve/resolv.conf.
+  # Ref: https://github.com/NVIDIA/NemoClaw/issues/744
+  nameserver="$(get_systemd_resolved_upstream || true)"
   if [ -n "$nameserver" ]; then
     printf '%s\n' "$nameserver"
     return 0

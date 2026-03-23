@@ -205,6 +205,71 @@ describe("shell runtime helpers", () => {
     assert.equal(result.stdout.trim(), "9.9.9.9");
   });
 
+  it("falls back to systemd-resolved upstream when host resolv.conf is loopback stub", () => {
+    // DGX Spark / Ubuntu: /etc/resolv.conf has 127.0.0.53 (systemd-resolved stub)
+    // Real upstreams are in /run/systemd/resolve/resolv.conf
+    // Ref: https://github.com/NVIDIA/NemoClaw/issues/744
+    const tmpResolvedConf = path.join(os.tmpdir(), `nemoclaw-resolved-${Date.now()}.conf`);
+    fs.writeFileSync(tmpResolvedConf, "nameserver 10.19.25.1\nnameserver 10.19.25.2\n");
+
+    try {
+      const result = runShell(
+        `source "${RUNTIME_SH}"; resolve_coredns_upstream $'nameserver 127.0.0.11' $'nameserver 127.0.0.53' docker`,
+        { NEMOCLAW_RESOLVED_CONF: tmpResolvedConf },
+      );
+
+      assert.equal(result.status, 0);
+      assert.equal(result.stdout.trim(), "10.19.25.1");
+    } finally {
+      fs.unlinkSync(tmpResolvedConf);
+    }
+  });
+
+  it("returns first non-loopback from systemd-resolved conf", () => {
+    const tmpResolvedConf = path.join(os.tmpdir(), `nemoclaw-resolved-${Date.now()}.conf`);
+    fs.writeFileSync(tmpResolvedConf, "nameserver 127.0.0.53\nnameserver 172.20.0.1\n");
+
+    try {
+      const result = runShell(
+        `source "${RUNTIME_SH}"; get_systemd_resolved_upstream`,
+        { NEMOCLAW_RESOLVED_CONF: tmpResolvedConf },
+      );
+
+      assert.equal(result.status, 0);
+      assert.equal(result.stdout.trim(), "172.20.0.1");
+    } finally {
+      fs.unlinkSync(tmpResolvedConf);
+    }
+  });
+
+  it("skips systemd-resolved fallback when resolved conf does not exist", () => {
+    const result = runShell(
+      `source "${RUNTIME_SH}"; resolve_coredns_upstream $'nameserver 127.0.0.11' $'nameserver 127.0.0.53' docker`,
+      { NEMOCLAW_RESOLVED_CONF: "/nonexistent/resolv.conf" },
+    );
+
+    // Should fail — no valid upstream found anywhere
+    assert.notEqual(result.status, 0);
+  });
+
+  it("prefers host resolv.conf over systemd-resolved when host has non-loopback", () => {
+    const tmpResolvedConf = path.join(os.tmpdir(), `nemoclaw-resolved-${Date.now()}.conf`);
+    fs.writeFileSync(tmpResolvedConf, "nameserver 10.19.25.1\n");
+
+    try {
+      const result = runShell(
+        `source "${RUNTIME_SH}"; resolve_coredns_upstream $'nameserver 127.0.0.11' $'nameserver 8.8.8.8' docker`,
+        { NEMOCLAW_RESOLVED_CONF: tmpResolvedConf },
+      );
+
+      assert.equal(result.status, 0);
+      // Should use 8.8.8.8 from host, not 10.19.25.1 from resolved
+      assert.equal(result.stdout.trim(), "8.8.8.8");
+    } finally {
+      fs.unlinkSync(tmpResolvedConf);
+    }
+  });
+
   it("does not consume installer stdin when reading the Colima VM nameserver", () => {
     const result = runShell(
       `function colima() { cat > /dev/null || true; printf 'nameserver 100.100.100.100\\n'; }

@@ -75,6 +75,8 @@ UPSTREAM_DNS="$(resolve_coredns_upstream "$CONTAINER_RESOLV_CONF" "$HOST_RESOLV_
 
 if [ -z "$UPSTREAM_DNS" ]; then
   echo "ERROR: Could not determine a non-loopback DNS upstream for $RUNTIME."
+  echo "Hint: If using systemd-resolved, check /run/systemd/resolve/resolv.conf"
+  echo "      or set a public DNS server in your network configuration."
   exit 1
 fi
 
