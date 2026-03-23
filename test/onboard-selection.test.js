@@ -81,4 +81,158 @@ const { setupNim } = require(${onboardPath});
     assert.ok(payload.lines.some((line) => line.includes("Press Enter to keep the cloud default")));
     assert.ok(payload.lines.some((line) => line.includes("Cloud models:")));
   });
+
+  it("exits early when Ollama is selected but no models are installed (#710)", () => {
+    const repoRoot = path.join(__dirname, "..");
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-onboard-no-models-"));
+    const scriptPath = path.join(tmpDir, "no-models-check.js");
+    const onboardPath = JSON.stringify(path.join(repoRoot, "bin", "lib", "onboard.js"));
+    const credentialsPath = JSON.stringify(path.join(repoRoot, "bin", "lib", "credentials.js"));
+    const runnerPath = JSON.stringify(path.join(repoRoot, "bin", "lib", "runner.js"));
+    const registryPath = JSON.stringify(path.join(repoRoot, "bin", "lib", "registry.js"));
+    // Simulate: Ollama installed and running, but no models pulled
+    const script = String.raw`
+const credentials = require(${credentialsPath});
+const runner = require(${runnerPath});
+const registry = require(${registryPath});
+
+let promptCount = 0;
+const errors = [];
+
+credentials.prompt = async (message) => {
+  promptCount += 1;
+  // Select Ollama (option 2: cloud is 1, ollama is 2)
+  return promptCount === 1 ? "2" : "";
+};
+credentials.ensureApiKey = async () => {};
+runner.runCapture = (command) => {
+  if (command.includes("command -v ollama")) return "/usr/bin/ollama";
+  if (command.includes("localhost:11434/api/tags")) return JSON.stringify({ models: [] });
+  // ollama list returns empty — no models installed
+  if (command.includes("ollama list")) return "";
+  if (command.includes("localhost:8000/v1/models")) return "";
+  return "";
+};
+registry.updateSandbox = () => {};
+
+// Capture process.exit to verify it exits
+const origExit = process.exit;
+let exitCode = null;
+process.exit = (code) => { exitCode = code; throw new Error("EXIT"); };
+
+const origError = console.error;
+console.error = (...args) => errors.push(args.join(" "));
+console.log = () => {};
+
+const { selectInferenceProvider } = require(${onboardPath});
+
+(async () => {
+  try {
+    await selectInferenceProvider(null);
+  } catch (e) {
+    if (e.message !== "EXIT") throw e;
+  }
+  origError(JSON.stringify({ exitCode, errors }));
+})().catch((error) => {
+  origError(error);
+  origExit(1);
+});
+`;
+    fs.writeFileSync(scriptPath, script);
+
+    const result = spawnSync(process.execPath, [scriptPath], {
+      cwd: repoRoot,
+      encoding: "utf-8",
+      env: { ...process.env, HOME: tmpDir },
+    });
+
+    const payload = JSON.parse(result.stderr.trim());
+    assert.equal(payload.exitCode, 1, "should exit with code 1");
+    assert.ok(
+      payload.errors.some((e) => e.includes("No Ollama models are installed")),
+      "should warn about missing models",
+    );
+    assert.ok(
+      payload.errors.some((e) => e.includes("ollama pull")),
+      "should suggest ollama pull command",
+    );
+  });
+
+  it("exits early on Linux when Ollama is not reachable from containers (#709)", () => {
+    const repoRoot = path.join(__dirname, "..");
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-onboard-bind-"));
+    const scriptPath = path.join(tmpDir, "bind-check.js");
+    const onboardPath = JSON.stringify(path.join(repoRoot, "bin", "lib", "onboard.js"));
+    const credentialsPath = JSON.stringify(path.join(repoRoot, "bin", "lib", "credentials.js"));
+    const runnerPath = JSON.stringify(path.join(repoRoot, "bin", "lib", "runner.js"));
+    const registryPath = JSON.stringify(path.join(repoRoot, "bin", "lib", "registry.js"));
+    const localInfPath = JSON.stringify(path.join(repoRoot, "bin", "lib", "local-inference.js"));
+    // Simulate: Ollama running with models, but containers can't reach it (Linux)
+    const script = String.raw`
+const credentials = require(${credentialsPath});
+const runner = require(${runnerPath});
+const registry = require(${registryPath});
+const localInf = require(${localInfPath});
+
+// Force Linux platform for the bind address hint
+const origHint = localInf.getOllamaBindAddressHint;
+localInf.getOllamaBindAddressHint = () => origHint("linux");
+
+let promptCount = 0;
+const errors = [];
+
+credentials.prompt = async (message) => {
+  promptCount += 1;
+  return promptCount === 1 ? "2" : "";
+};
+credentials.ensureApiKey = async () => {};
+let runCaptureCount = 0;
+runner.runCapture = (command) => {
+  if (command.includes("command -v ollama")) return "/usr/bin/ollama";
+  if (command.includes("localhost:11434/api/tags")) return JSON.stringify({ models: [{ name: "qwen3:32b" }] });
+  if (command.includes("ollama list")) return "qwen3:32b  abc  20 GB  now";
+  if (command.includes("localhost:8000/v1/models")) return "";
+  // Container reachability check fails
+  if (command.includes("host.openshell.internal")) return "";
+  return "";
+};
+registry.updateSandbox = () => {};
+
+const origExit = process.exit;
+let exitCode = null;
+process.exit = (code) => { exitCode = code; throw new Error("EXIT"); };
+
+const origError = console.error;
+console.error = (...args) => errors.push(args.join(" "));
+console.log = () => {};
+
+const { selectInferenceProvider } = require(${onboardPath});
+
+(async () => {
+  try {
+    await selectInferenceProvider(null);
+  } catch (e) {
+    if (e.message !== "EXIT") throw e;
+  }
+  origError(JSON.stringify({ exitCode, errors }));
+})().catch((error) => {
+  origError(error);
+  origExit(1);
+});
+`;
+    fs.writeFileSync(scriptPath, script);
+
+    const result = spawnSync(process.execPath, [scriptPath], {
+      cwd: repoRoot,
+      encoding: "utf-8",
+      env: { ...process.env, HOME: tmpDir },
+    });
+
+    const payload = JSON.parse(result.stderr.trim());
+    assert.equal(payload.exitCode, 1, "should exit with code 1");
+    assert.ok(
+      payload.errors.some((e) => e.includes("OLLAMA_HOST=0.0.0.0")),
+      "should show bind address remediation on Linux",
+    );
+  });
 });

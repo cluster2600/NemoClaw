@@ -111,6 +111,38 @@ function getOllamaModelOptions(runCapture) {
   return [DEFAULT_OLLAMA_MODEL];
 }
 
+/**
+ * Check whether Ollama has any locally installed models.
+ * Returns true only if `ollama list` reports at least one real model.
+ * Used to warn users early (before sandbox creation) that they need
+ * to pull a model first.
+ * Ref: https://github.com/NVIDIA/NemoClaw/issues/710
+ */
+function hasInstalledOllamaModels(runCapture) {
+  const output = runCapture("ollama list 2>/dev/null", { ignoreError: true });
+  const parsed = parseOllamaList(output);
+  return parsed.length > 0;
+}
+
+/**
+ * Build an actionable remediation message for Linux users whose Ollama
+ * is bound to 127.0.0.1 (the default) — containers cannot reach it.
+ * Returns null on non-Linux platforms or when Ollama is already
+ * listening on 0.0.0.0.
+ * Ref: https://github.com/NVIDIA/NemoClaw/issues/709
+ */
+function getOllamaBindAddressHint(platform = process.platform) {
+  if (platform !== "linux") return null;
+  return (
+    "On Linux, Ollama defaults to 127.0.0.1 which is unreachable from containers.\n" +
+    "  To fix, restart Ollama with:\n" +
+    "    OLLAMA_HOST=0.0.0.0:11434 ollama serve\n" +
+    "  Or set the env var permanently:\n" +
+    "    sudo systemctl edit ollama  # add Environment=\"OLLAMA_HOST=0.0.0.0\"\n" +
+    "    sudo systemctl restart ollama"
+  );
+}
+
 function getDefaultOllamaModel(runCapture) {
   const models = getOllamaModelOptions(runCapture);
   return models.includes(DEFAULT_OLLAMA_MODEL) ? DEFAULT_OLLAMA_MODEL : models[0];
@@ -168,9 +200,11 @@ module.exports = {
   getLocalProviderBaseUrl,
   getLocalProviderContainerReachabilityCheck,
   getLocalProviderHealthCheck,
+  getOllamaBindAddressHint,
   getOllamaModelOptions,
   getOllamaProbeCommand,
   getOllamaWarmupCommand,
+  hasInstalledOllamaModels,
   parseOllamaList,
   validateOllamaModel,
   validateLocalProvider,

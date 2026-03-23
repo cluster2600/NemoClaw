@@ -11,9 +11,11 @@ const {
   getLocalProviderBaseUrl,
   getLocalProviderContainerReachabilityCheck,
   getLocalProviderHealthCheck,
+  getOllamaBindAddressHint,
   getOllamaModelOptions,
   getOllamaProbeCommand,
   getOllamaWarmupCommand,
+  hasInstalledOllamaModels,
   parseOllamaList,
   validateOllamaModel,
   validateLocalProvider,
@@ -153,5 +155,46 @@ describe("local inference helpers", () => {
       () => JSON.stringify({ model: "nemotron-3-nano:30b", response: "hello", done: true }),
     );
     assert.deepEqual(result, { ok: true });
+  });
+
+  // ── hasInstalledOllamaModels (#710) ──────────────────────────────
+
+  it("returns true when ollama list reports installed models", () => {
+    assert.equal(
+      hasInstalledOllamaModels(
+        () => "nemotron-3-nano:30b  abc  24 GB  now\nqwen3:32b  def  20 GB  now",
+      ),
+      true,
+    );
+  });
+
+  it("returns false when ollama list is empty", () => {
+    assert.equal(hasInstalledOllamaModels(() => ""), false);
+  });
+
+  it("returns false when ollama list returns only the header", () => {
+    assert.equal(
+      hasInstalledOllamaModels(
+        () => "NAME                        ID              SIZE      MODIFIED",
+      ),
+      false,
+    );
+  });
+
+  // ── getOllamaBindAddressHint (#709) ──────────────────────────────
+
+  it("returns bind address hint on Linux", () => {
+    const hint = getOllamaBindAddressHint("linux");
+    assert.ok(hint);
+    assert.match(hint, /OLLAMA_HOST=0\.0\.0\.0/);
+    assert.match(hint, /systemctl/);
+  });
+
+  it("returns null on macOS (no bind address issue)", () => {
+    assert.equal(getOllamaBindAddressHint("darwin"), null);
+  });
+
+  it("returns null on Windows", () => {
+    assert.equal(getOllamaBindAddressHint("win32"), null);
   });
 });

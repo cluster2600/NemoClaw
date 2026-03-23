@@ -11,10 +11,13 @@ const path = require("path");
 const { spawn, spawnSync } = require("child_process");
 const { ROOT, SCRIPTS, run, runCapture, shellQuote } = require("./runner");
 const {
+  DEFAULT_OLLAMA_MODEL,
   getDefaultOllamaModel,
   getLocalProviderBaseUrl,
+  getOllamaBindAddressHint,
   getOllamaModelOptions,
   getOllamaWarmupCommand,
+  hasInstalledOllamaModels,
   validateOllamaModel,
   validateLocalProvider,
 } = require("./local-inference");
@@ -775,6 +778,26 @@ async function selectInferenceProvider(gpu) {
         run("OLLAMA_HOST=0.0.0.0:11434 ollama serve > /dev/null 2>&1 &", { ignoreError: true });
         sleep(2);
       }
+      // Early validation: warn about missing models BEFORE sandbox creation (#710)
+      if (!hasInstalledOllamaModels(runCapture)) {
+        console.error("");
+        console.error("  No Ollama models are installed locally.");
+        console.error(`  Pull a model first:  ollama pull ${DEFAULT_OLLAMA_MODEL}`);
+        console.error("  Then re-run:  nemoclaw onboard");
+        process.exit(1);
+      }
+      // Early validation: warn about bind address on Linux (#709)
+      const bindHint = getOllamaBindAddressHint();
+      if (bindHint) {
+        const earlyValidation = validateLocalProvider("ollama-local", runCapture);
+        if (!earlyValidation.ok) {
+          console.error("");
+          console.error(`  ${earlyValidation.message}`);
+          console.error("");
+          console.error(`  ${bindHint}`);
+          process.exit(1);
+        }
+      }
       console.log("  ✓ Using Ollama on localhost:11434");
       provider = "ollama-local";
       if (isNonInteractive()) {
@@ -788,6 +811,14 @@ async function selectInferenceProvider(gpu) {
       console.log("  Starting Ollama...");
       run("OLLAMA_HOST=0.0.0.0:11434 ollama serve > /dev/null 2>&1 &", { ignoreError: true });
         sleep(2);
+      // Early validation: warn about missing models BEFORE sandbox creation (#710)
+      if (!hasInstalledOllamaModels(runCapture)) {
+        console.error("");
+        console.error("  Ollama was installed but no models are available yet.");
+        console.error(`  Pull a model first:  ollama pull ${DEFAULT_OLLAMA_MODEL}`);
+        console.error("  Then re-run:  nemoclaw onboard");
+        process.exit(1);
+      }
       console.log("  ✓ Using Ollama on localhost:11434");
       provider = "ollama-local";
       if (isNonInteractive()) {
