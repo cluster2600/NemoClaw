@@ -126,7 +126,27 @@ PYAUTOPAIR
   echo "[gateway] auto-pair watcher launched (pid $!)"
 }
 
+fix_home_permissions() {
+  # OpenShell may override the home directory mode to 0711 (drwx--x--x),
+  # which prevents agents and child processes from listing files.
+  # Repair to 0755 at startup so the sandbox is fully functional.
+  # Ref: https://github.com/NVIDIA/NemoClaw/issues/622
+  local home_dir
+  home_dir="$(eval echo ~)"
+  if [ -d "$home_dir" ] && [ -O "$home_dir" ]; then
+    local current_mode
+    current_mode="$(stat -c '%a' "$home_dir" 2>/dev/null || stat -f '%Lp' "$home_dir" 2>/dev/null || echo "")"
+    case "$current_mode" in
+      700|711|710)
+        chmod 755 "$home_dir" 2>/dev/null && \
+          echo "[startup] Fixed home directory permissions: ${current_mode} → 755" || true
+        ;;
+    esac
+  fi
+}
+
 echo 'Setting up NemoClaw...'
+fix_home_permissions
 # openclaw doctor --fix and openclaw plugins install already ran at build time
 # (Dockerfile Step 28). At runtime they fail with EPERM against the locked
 # /sandbox/.openclaw directory and accomplish nothing.

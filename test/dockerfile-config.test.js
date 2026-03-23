@@ -168,3 +168,49 @@ describe("Dockerfile config: allowedOrigins extra-origins parsing (#739)", () =>
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// Sandbox home directory permissions (#622)
+// ---------------------------------------------------------------------------
+
+describe("Dockerfile config: sandbox home directory permissions (#622)", () => {
+  it("Dockerfile explicitly sets /sandbox to chmod 755", () => {
+    const repoDockerfile = path.join(__dirname, "..", "Dockerfile");
+    const content = fs.readFileSync(repoDockerfile, "utf8");
+    assert.match(
+      content,
+      /chmod\s+755\s+\/sandbox\b/,
+      "Dockerfile must explicitly chmod 755 /sandbox to prevent 0711 permission issues"
+    );
+  });
+
+  it("test Dockerfile also sets /sandbox to chmod 755", () => {
+    const testDockerfile = path.join(__dirname, "Dockerfile.sandbox");
+    const content = fs.readFileSync(testDockerfile, "utf8");
+    assert.match(
+      content,
+      /chmod\s+755\s+\/sandbox\b/,
+      "Test Dockerfile must also chmod 755 /sandbox"
+    );
+  });
+
+  it("startup script contains fix_home_permissions function", () => {
+    const startScript = path.join(__dirname, "..", "scripts", "nemoclaw-start.sh");
+    const content = fs.readFileSync(startScript, "utf8");
+    assert.match(
+      content,
+      /fix_home_permissions/,
+      "nemoclaw-start.sh must contain fix_home_permissions for runtime repair"
+    );
+  });
+
+  it("startup script repairs restrictive modes (700, 711, 710)", () => {
+    const startScript = path.join(__dirname, "..", "scripts", "nemoclaw-start.sh");
+    const content = fs.readFileSync(startScript, "utf8");
+    // The case statement must cover the known restrictive modes
+    assert.match(content, /700/, "Must handle mode 700");
+    assert.match(content, /711/, "Must handle mode 711");
+    assert.match(content, /710/, "Must handle mode 710");
+    assert.match(content, /chmod\s+755/, "Must repair to 755");
+  });
+});

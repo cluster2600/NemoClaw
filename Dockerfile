@@ -19,9 +19,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Create sandbox user (matches OpenShell convention)
+# Explicit chmod 755 prevents OpenShell from inheriting a restrictive home
+# directory mode (e.g. 0711) that would block agents from listing files.
+# Ref: https://github.com/NVIDIA/NemoClaw/issues/622
 RUN groupadd -r sandbox && useradd -r -g sandbox -d /sandbox -s /bin/bash sandbox \
     && mkdir -p /sandbox/.nemoclaw \
-    && chown -R sandbox:sandbox /sandbox
+    && chown -R sandbox:sandbox /sandbox \
+    && chmod 755 /sandbox
 
 # Split .openclaw into immutable config dir + writable state dir.
 # The policy makes /sandbox/.openclaw read-only via Landlock, so the agent
