@@ -89,7 +89,7 @@ inference_api = os.environ['NEMOCLAW_INFERENCE_API']; \
 inference_compat = json.loads(base64.b64decode(os.environ['NEMOCLAW_INFERENCE_COMPAT_B64']).decode('utf-8')); \
 parsed = urlparse(chat_ui_url); \
 chat_origin = f'{parsed.scheme}://{parsed.netloc}' if parsed.scheme and parsed.netloc else 'http://127.0.0.1:18789'; \
-origins = ['http://127.0.0.1:18789']; \
+origins = ['*', 'http://127.0.0.1:18789', 'http://127.0.0.1:3333']; \
 origins = list(dict.fromkeys(origins + [chat_origin])); \
 providers = { \
     provider_key: { \
@@ -110,7 +110,7 @@ config = { \
             'dangerouslyDisableDeviceAuth': True, \
             'allowedOrigins': origins, \
         }, \
-        'trustedProxies': ['127.0.0.1', '::1'], \
+        'trustedProxies': ['127.0.0.1', '::1', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'], \
         'auth': {'token': secrets.token_hex(32)} \
     } \
 }; \
