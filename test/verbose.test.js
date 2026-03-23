@@ -168,4 +168,58 @@ describe("logger module", () => {
       if (saved.NEMOCLAW_VERBOSE !== undefined) process.env.NEMOCLAW_VERBOSE = saved.NEMOCLAW_VERBOSE;
     }
   });
+
+  it("debug() handles more format specifiers than args", () => {
+    const saved = { LOG_LEVEL: process.env.LOG_LEVEL, NEMOCLAW_VERBOSE: process.env.NEMOCLAW_VERBOSE };
+    delete process.env.LOG_LEVEL;
+    delete process.env.NEMOCLAW_VERBOSE;
+    try {
+      delete require.cache[require.resolve(loggerPath)];
+      const { setVerbose, debug } = require(loggerPath);
+
+      const writes = [];
+      const origWrite = process.stderr.write;
+      process.stderr.write = (chunk) => { writes.push(chunk); return true; };
+
+      try {
+        setVerbose(true);
+        // More %s placeholders than args — extra placeholders should become "%s"
+        debug("port %s on host %s", "8080");
+        assert.equal(writes.length, 1);
+        assert.ok(writes[0].includes("8080"), "first arg should be interpolated");
+        assert.ok(writes[0].includes("%s"), "excess specifier should remain as %s");
+      } finally {
+        process.stderr.write = origWrite;
+      }
+    } finally {
+      if (saved.LOG_LEVEL !== undefined) process.env.LOG_LEVEL = saved.LOG_LEVEL;
+      if (saved.NEMOCLAW_VERBOSE !== undefined) process.env.NEMOCLAW_VERBOSE = saved.NEMOCLAW_VERBOSE;
+    }
+  });
+
+  it("debug() with no format specifiers writes plain message", () => {
+    const saved = { LOG_LEVEL: process.env.LOG_LEVEL, NEMOCLAW_VERBOSE: process.env.NEMOCLAW_VERBOSE };
+    delete process.env.LOG_LEVEL;
+    delete process.env.NEMOCLAW_VERBOSE;
+    try {
+      delete require.cache[require.resolve(loggerPath)];
+      const { setVerbose, debug } = require(loggerPath);
+
+      const writes = [];
+      const origWrite = process.stderr.write;
+      process.stderr.write = (chunk) => { writes.push(chunk); return true; };
+
+      try {
+        setVerbose(true);
+        debug("plain message no args");
+        assert.equal(writes.length, 1);
+        assert.ok(writes[0].includes("plain message no args"));
+      } finally {
+        process.stderr.write = origWrite;
+      }
+    } finally {
+      if (saved.LOG_LEVEL !== undefined) process.env.LOG_LEVEL = saved.LOG_LEVEL;
+      if (saved.NEMOCLAW_VERBOSE !== undefined) process.env.NEMOCLAW_VERBOSE = saved.NEMOCLAW_VERBOSE;
+    }
+  });
 });

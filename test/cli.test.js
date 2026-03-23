@@ -91,4 +91,43 @@ describe("CLI dispatch", () => {
     assert.ok(r.out.includes("Troubleshooting"), "missing Troubleshooting section");
     assert.ok(r.out.includes("nemoclaw debug"), "help should mention debug command");
   });
+
+  it("--version exits 0 and shows version string", () => {
+    const r = run("--version");
+    assert.equal(r.code, 0);
+    assert.match(r.out.trim(), /^nemoclaw v\d+\.\d+\.\d+/);
+  });
+
+  it("-v exits 0 and shows same version as --version", () => {
+    const r = run("-v");
+    assert.equal(r.code, 0);
+    assert.match(r.out.trim(), /^nemoclaw v\d+\.\d+\.\d+/);
+    // Should match --version output
+    const full = run("--version");
+    assert.equal(r.out.trim(), full.out.trim());
+  });
+
+  it("--verbose help exits 0 (verbose flag stripped before dispatch)", () => {
+    const r = run("--verbose help");
+    assert.equal(r.code, 0);
+    assert.ok(r.out.includes("Getting Started"), "verbose help should still show help");
+  });
+
+  it("--debug help exits 0 (debug flag stripped before dispatch)", () => {
+    const r = run("--debug help");
+    assert.equal(r.code, 0);
+    assert.ok(r.out.includes("Getting Started"), "debug help should still show help");
+  });
+
+  it("list with empty HOME shows no sandboxes", () => {
+    const r = run("list");
+    assert.equal(r.code, 0);
+    assert.ok(r.out.includes("No sandboxes"));
+  });
+
+  it("unknown sandbox name with action exits 1", () => {
+    const r = run("nonexistent-sandbox-xyz connect");
+    assert.equal(r.code, 1);
+    assert.ok(r.out.includes("Unknown command"));
+  });
 });

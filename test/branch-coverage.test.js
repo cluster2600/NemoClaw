@@ -372,6 +372,7 @@ describe("inference-config branch coverage", () => {
 // ── config-io.js uncovered branches ───────────────────────────────
 
 const {
+  ensureConfigDir,
   readConfigFile,
   writeConfigFile,
   ConfigPermissionError,
@@ -419,6 +420,189 @@ describe("config-io branch coverage", () => {
     } finally {
       fs.rmSync(tmpDir, { recursive: true });
     }
+  });
+
+  it("ensureConfigDir rethrows non-EACCES errors from mkdirSync", () => {
+    // Use a path where a parent is a regular file — triggers ENOTDIR
+    const tmpFile = path.join(os.tmpdir(), `config-io-notdir-${Date.now()}.txt`);
+    fs.writeFileSync(tmpFile, "file-not-dir");
+    try {
+      assert.throws(
+        () => ensureConfigDir(path.join(tmpFile, "sub")),
+        (err) => {
+          assert.notEqual(err.name, "ConfigPermissionError");
+          assert.equal(err.code, "ENOTDIR");
+          return true;
+        },
+      );
+    } finally {
+      fs.unlinkSync(tmpFile);
+    }
+  });
+
+  it("writeConfigFile rethrows non-EACCES write errors", () => {
+    // Write to a path where the parent is a file, not a directory
+    const tmpFile = path.join(os.tmpdir(), `config-io-wnotdir-${Date.now()}.txt`);
+    fs.writeFileSync(tmpFile, "file-not-dir");
+    try {
+      assert.throws(
+        () => writeConfigFile(path.join(tmpFile, "sub", "config.json"), { x: 1 }),
+        (err) => {
+          assert.notEqual(err.name, "ConfigPermissionError");
+          return true;
+        },
+      );
+    } finally {
+      fs.unlinkSync(tmpFile);
+    }
+  });
+
+  it("ConfigPermissionError without cause omits cause property", () => {
+    const err = new ConfigPermissionError("no cause test", "/tmp/x");
+    assert.equal(err.cause, undefined);
+    assert.equal(err.name, "ConfigPermissionError");
+  });
+});
+
+// ── platform.js additional branch coverage ────────────────────────
+
+const {
+  detectDockerHost,
+  findColimaDockerSocket,
+  getColimaDockerSocketCandidates,
+  getDockerSocketCandidates,
+  isUnsupportedMacosRuntime,
+} = require("../bin/lib/platform");
+
+describe("platform additional branch coverage", () => {
+  describe("findColimaDockerSocket — no socket found", () => {
+    it("returns null when no sockets exist", () => {
+      assert.equal(
+        findColimaDockerSocket({ home: "/tmp/nonexistent-home", existsSync: () => false }),
+        null,
+      );
+    });
+  });
+
+  describe("getColimaDockerSocketCandidates — custom home", () => {
+    it("returns candidates under the given home", () => {
+      const candidates = getColimaDockerSocketCandidates({ home: "/home/testuser" });
+      assert.equal(candidates.length, 2);
+      assert.ok(candidates[0].startsWith("/home/testuser/"));
+      assert.ok(candidates[1].startsWith("/home/testuser/"));
+    });
+  });
+
+  describe("isUnsupportedMacosRuntime — non-podman on darwin", () => {
+    it("returns false for docker on macOS", () => {
+      assert.equal(isUnsupportedMacosRuntime("docker", { platform: "darwin" }), false);
+    });
+
+    it("returns false for colima on macOS", () => {
+      assert.equal(isUnsupportedMacosRuntime("colima", { platform: "darwin" }), false);
+    });
+
+    it("returns false for docker-desktop on macOS", () => {
+      assert.equal(isUnsupportedMacosRuntime("docker-desktop", { platform: "darwin" }), false);
+    });
+  });
+
+  describe("detectDockerHost — no env, no socket on Linux", () => {
+    it("returns null on Linux with no DOCKER_HOST and no sockets", () => {
+      const result = detectDockerHost({
+        env: {},
+        platform: "linux",
+        home: "/tmp/no-home",
+        existsSync: () => false,
+      });
+      assert.equal(result, null);
+    });
+  });
+
+  describe("getDockerSocketCandidates — platform branches", () => {
+    it("returns empty for non-darwin platforms", () => {
+      assert.deepEqual(getDockerSocketCandidates({ platform: "win32", home: "/tmp" }), []);
+    });
+
+    it("returns macOS candidates including Docker Desktop socket", () => {
+      const candidates = getDockerSocketCandidates({ platform: "darwin", home: "/Users/test" });
+      assert.ok(candidates.length === 3);
+      assert.ok(candidates.some((c) => c.includes(".docker/run/docker.sock")));
+    });
+  });
+});
+
+// ── resolve-openshell.js branch coverage ──────────────────────────
+
+const { resolveOpenshell } = require("../bin/lib/resolve-openshell");
+
+describe("resolve-openshell branch coverage", () => {
+  it("returns null when commandVResult is empty string", () => {
+    const result = resolveOpenshell({
+      commandVResult: "",
+      checkExecutable: () => false,
+      home: "/tmp",
+    });
+    assert.equal(result, null);
+  });
+
+  it("returns null when commandVResult is a relative path", () => {
+    const result = resolveOpenshell({
+      commandVResult: "openshell",
+      checkExecutable: () => false,
+      home: "/tmp",
+    });
+    assert.equal(result, null);
+  });
+
+  it("returns commandVResult when it is an absolute path", () => {
+    const result = resolveOpenshell({
+      commandVResult: "/usr/bin/openshell",
+    });
+    assert.equal(result, "/usr/bin/openshell");
+  });
+
+  it("skips home candidate when home does not start with /", () => {
+    const checked = [];
+    const result = resolveOpenshell({
+      commandVResult: null,
+      home: "relative-home",
+      checkExecutable: (p) => { checked.push(p); return false; },
+    });
+    assert.equal(result, null);
+    // Should not include any path based on "relative-home"
+    assert.ok(checked.every((p) => !p.includes("relative-home")));
+    // Should still check /usr/local/bin and /usr/bin
+    assert.ok(checked.includes("/usr/local/bin/openshell"));
+    assert.ok(checked.includes("/usr/bin/openshell"));
+  });
+
+  it("returns fallback candidate when it is executable", () => {
+    const result = resolveOpenshell({
+      commandVResult: null,
+      home: "/home/test",
+      checkExecutable: (p) => p === "/usr/local/bin/openshell",
+    });
+    assert.equal(result, "/usr/local/bin/openshell");
+  });
+
+  it("prefers home .local/bin over system paths", () => {
+    const result = resolveOpenshell({
+      commandVResult: null,
+      home: "/home/test",
+      checkExecutable: (p) =>
+        p === "/home/test/.local/bin/openshell" || p === "/usr/local/bin/openshell",
+    });
+    assert.equal(result, "/home/test/.local/bin/openshell");
+  });
+
+  it("returns null when home is undefined", () => {
+    const result = resolveOpenshell({
+      commandVResult: null,
+      home: undefined,
+      checkExecutable: () => false,
+    });
+    assert.equal(result, null);
   });
 });
 
