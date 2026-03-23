@@ -143,6 +143,58 @@ describe("runner helpers", () => {
     });
   });
 
+  describe("redactSecrets", () => {
+    it("redacts NVIDIA API key assignments", () => {
+      const { redactSecrets } = require(runnerPath);
+      assert.equal(
+        redactSecrets("NVIDIA_API_KEY=nvapi-abc123xyz"),
+        "NVIDIA_API_KEY=<REDACTED>",
+      );
+    });
+
+    it("redacts nvapi- prefixed tokens in free text", () => {
+      const { redactSecrets } = require(runnerPath);
+      const input = "using key nvapi-AbCdEfGhIj1234 for auth";
+      assert.ok(!redactSecrets(input).includes("nvapi-AbCdEfGhIj1234"));
+      assert.ok(redactSecrets(input).includes("<REDACTED>"));
+    });
+
+    it("redacts GitHub PATs", () => {
+      const { redactSecrets } = require(runnerPath);
+      const ghToken = "ghp_" + "a".repeat(36);
+      assert.equal(redactSecrets(`GITHUB_TOKEN=${ghToken}`), "GITHUB_TOKEN=<REDACTED>");
+    });
+
+    it("redacts Bearer tokens", () => {
+      const { redactSecrets } = require(runnerPath);
+      assert.equal(
+        redactSecrets("Authorization: Bearer eyJhbGciOiJIUzI1Ni"),
+        "Authorization: Bearer <REDACTED>",
+      );
+    });
+
+    it("redacts multiple secrets in one string", () => {
+      const { redactSecrets } = require(runnerPath);
+      const input = "NVIDIA_API_KEY=nvapi-secret123456 GITHUB_TOKEN=ghp_" + "b".repeat(36);
+      const result = redactSecrets(input);
+      assert.ok(!result.includes("nvapi-secret123456"));
+      assert.ok(!result.includes("ghp_"));
+      assert.ok(result.includes("<REDACTED>"));
+    });
+
+    it("returns non-string values unchanged", () => {
+      const { redactSecrets } = require(runnerPath);
+      assert.equal(redactSecrets(null), null);
+      assert.equal(redactSecrets(undefined), undefined);
+      assert.equal(redactSecrets(42), 42);
+    });
+
+    it("leaves clean strings unchanged", () => {
+      const { redactSecrets } = require(runnerPath);
+      assert.equal(redactSecrets("bash setup.sh"), "bash setup.sh");
+    });
+  });
+
   describe("regression guards", () => {
     it("nemoclaw.js does not use execSync", () => {
       const fs = require("fs");
@@ -198,6 +250,30 @@ describe("runner helpers", () => {
       } finally {
         fs.rmSync(canaryDir, { recursive: true, force: true });
       }
+    });
+
+    it("setupSpark does not embed API key in command string", () => {
+      const fs = require("fs");
+      const src = fs.readFileSync(path.join(__dirname, "..", "bin", "nemoclaw.js"), "utf-8");
+      // Extract the setupSpark function body — between "async function setupSpark"
+      // and the next top-level "async function" or "function" declaration.
+      const match = src.match(/async function setupSpark\b[\s\S]*?\n\}/);
+      assert.ok(match, "setupSpark function must exist");
+      const body = match[0];
+      assert.ok(
+        !body.includes("NVIDIA_API_KEY=") || body.includes("env:"),
+        "setupSpark must pass API key via env option, not in the command string",
+      );
+    });
+
+    it("walkthrough.sh does not echo raw API key value", () => {
+      const fs = require("fs");
+      const src = fs.readFileSync(path.join(__dirname, "..", "scripts", "walkthrough.sh"), "utf-8");
+      // The script should reference the variable name, not expand it unsafely
+      assert.ok(
+        !src.includes('echo "    export NVIDIA_API_KEY=$NVIDIA_API_KEY"'),
+        "walkthrough.sh must not echo the raw API key value to terminal",
+      );
     });
 
     it("telegram bridge validates SANDBOX_NAME on startup", () => {
