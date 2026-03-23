@@ -105,6 +105,7 @@ async function checkPortAvailable(port, opts) {
 // 8000 → Django/vLLM dev servers).  Users override via env vars.
 const DEFAULT_GATEWAY_PORT = 8080;
 const DEFAULT_DASHBOARD_PORT = 18789;
+const DEFAULT_NIM_PORT = 8000;
 
 /**
  * Parse and validate a port from an env var override.
@@ -168,12 +169,18 @@ function getConfiguredPorts() {
     console.error(`  !! ${dash.error}`);
     process.exit(1);
   }
-  return { gatewayPort: gw, dashboardPort: dash };
+  const nimPort = parsePortEnv("NEMOCLAW_NIM_PORT", DEFAULT_NIM_PORT);
+  if (typeof nimPort === "object" && nimPort.error) {
+    console.error(`  !! ${nimPort.error}`);
+    process.exit(1);
+  }
+  return { gatewayPort: gw, dashboardPort: dash, nimPort };
 }
 
 module.exports = {
   DEFAULT_DASHBOARD_PORT,
   DEFAULT_GATEWAY_PORT,
+  DEFAULT_NIM_PORT,
   checkPortAvailable,
   getConfiguredPorts,
   parsePortEnv,

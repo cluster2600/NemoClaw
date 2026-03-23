@@ -175,8 +175,9 @@ function stopNimContainer(sandboxName) {
   run(`docker rm ${qn} 2>/dev/null || true`, { ignoreError: true });
 }
 
-function nimStatus(sandboxName) {
+function nimStatus(sandboxName, port) {
   const name = containerName(sandboxName);
+  const safePort = Number(port) || 8000;
   try {
     const state = runCapture(
       `docker inspect --format '{{.State.Status}}' ${shellQuote(name)} 2>/dev/null`,
@@ -186,7 +187,7 @@ function nimStatus(sandboxName) {
 
     let healthy = false;
     if (state === "running") {
-      const health = runCapture(`curl -sf http://localhost:8000/v1/models 2>/dev/null`, {
+      const health = runCapture(`curl -sf http://localhost:${safePort}/v1/models 2>/dev/null`, {
         ignoreError: true,
       });
       healthy = !!health;

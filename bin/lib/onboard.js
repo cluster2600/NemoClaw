@@ -370,11 +370,12 @@ async function preflight() {
     console.log("  ✓ Previous session cleaned up");
   }
 
-  // Required ports — configurable via NEMOCLAW_GATEWAY_PORT / NEMOCLAW_DASHBOARD_PORT
-  const { gatewayPort, dashboardPort } = getConfiguredPorts();
+  // Required ports — configurable via NEMOCLAW_GATEWAY_PORT / NEMOCLAW_DASHBOARD_PORT / NEMOCLAW_NIM_PORT
+  const { gatewayPort, dashboardPort, nimPort } = getConfiguredPorts();
   const requiredPorts = [
     { port: gatewayPort, label: "OpenShell gateway", envVar: "NEMOCLAW_GATEWAY_PORT" },
     { port: dashboardPort, label: "NemoClaw dashboard", envVar: "NEMOCLAW_DASHBOARD_PORT" },
+    { port: nimPort, label: "NIM inference", envVar: "NEMOCLAW_NIM_PORT" },
   ];
   const resolvedPorts = {};
   for (const { port, label, envVar } of requiredPorts) {
@@ -418,6 +419,7 @@ async function preflight() {
   // Store resolved ports for downstream steps
   process.env._NEMOCLAW_RESOLVED_GATEWAY_PORT = String(resolvedPorts.NEMOCLAW_GATEWAY_PORT);
   process.env._NEMOCLAW_RESOLVED_DASHBOARD_PORT = String(resolvedPorts.NEMOCLAW_DASHBOARD_PORT);
+  process.env._NEMOCLAW_RESOLVED_NIM_PORT = String(resolvedPorts.NEMOCLAW_NIM_PORT);
 
   // GPU
   const gpu = nim.detectGpu();
@@ -907,6 +909,7 @@ async function setupNim(sandboxName, gpu) {
 // Start NIM container if NIM was selected and update the sandbox registry.
 async function setupInferenceBackend(sandboxName, model, provider, gpu) {
   let nimContainer = null;
+  const nimPort = Number(process.env._NEMOCLAW_RESOLVED_NIM_PORT) || 8000;
 
   if (provider === "vllm-local" && gpu && gpu.nimCapable && EXPERIMENTAL) {
     // NIM container setup — pull and start the container
@@ -917,17 +920,17 @@ async function setupInferenceBackend(sandboxName, model, provider, gpu) {
       nim.pullNimImage(model);
 
       console.log("  Starting NIM container...");
-      nimContainer = nim.startNimContainer(sandboxName, model);
+      nimContainer = nim.startNimContainer(sandboxName, model, nimPort);
 
       console.log("  Waiting for NIM to become healthy...");
-      if (!nim.waitForNimHealth()) {
+      if (!nim.waitForNimHealth(nimPort)) {
         console.error("  NIM failed to start. Falling back to cloud API.");
         nimContainer = null;
       }
     }
   }
 
-  registry.updateSandbox(sandboxName, { model, provider, nimContainer });
+  registry.updateSandbox(sandboxName, { model, provider, nimContainer, nimPort });
 }
 
 // ── Step 5: Inference routing ────────────────────────────────────

@@ -3,6 +3,8 @@
 
 const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
+const fs = require("fs");
+const path = require("path");
 
 const nim = require("../bin/lib/nim");
 
@@ -72,6 +74,41 @@ describe("nim", () => {
     it("returns not running for nonexistent container", () => {
       const st = nim.nimStatus("nonexistent-test-xyz");
       assert.equal(st.running, false);
+    });
+
+    it("accepts custom port parameter", () => {
+      const st = nim.nimStatus("nonexistent-test-xyz", 9001);
+      assert.equal(st.running, false);
+      assert.equal(st.container, "nemoclaw-nim-nonexistent-test-xyz");
+    });
+
+    it("defaults to port 8000 when port is undefined", () => {
+      const st = nim.nimStatus("nonexistent-test-xyz", undefined);
+      assert.equal(st.running, false);
+    });
+
+    it("defaults to port 8000 when port is null", () => {
+      const st = nim.nimStatus("nonexistent-test-xyz", null);
+      assert.equal(st.running, false);
+    });
+  });
+
+  describe("nimStatus uses configurable port (#684/#713)", () => {
+    it("nimStatus health check URL uses port parameter, not hardcoded 8000", () => {
+      const src = fs.readFileSync(path.join(__dirname, "..", "bin", "lib", "nim.js"), "utf-8");
+      // Extract nimStatus function body
+      const match = src.match(/function nimStatus\b[\s\S]*?\n\}/);
+      assert.ok(match, "nimStatus function must exist");
+      const body = match[0];
+      // The curl URL should use a variable (safePort), not a hardcoded 8000
+      assert.ok(
+        !body.includes("localhost:8000"),
+        "nimStatus must use port parameter in health check URL, not hardcoded 8000",
+      );
+      assert.ok(
+        body.includes("safePort"),
+        "nimStatus should use safePort variable for the health check URL",
+      );
     });
   });
 });

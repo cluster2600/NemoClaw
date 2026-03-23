@@ -316,11 +316,15 @@ function sandboxStatus(sandboxName) {
   // openshell info
   run(`openshell sandbox get ${shellQuote(sandboxName)} 2>/dev/null || true`, { ignoreError: true });
 
-  // NIM health
-  const nimStat = nim.nimStatus(sandboxName);
+  // NIM health — use stored port from registry (falls back to 8000)
+  const nimPort = sb ? sb.nimPort : undefined;
+  const nimStat = nim.nimStatus(sandboxName, nimPort);
   console.log(`    NIM:      ${nimStat.running ? `running (${nimStat.container})` : "not running"}`);
   if (nimStat.running) {
     console.log(`    Healthy:  ${nimStat.healthy ? "yes" : "no"}`);
+    if (nimPort && nimPort !== 8000) {
+      console.log(`    NIM port: ${nimPort}`);
+    }
   }
   console.log("");
 }

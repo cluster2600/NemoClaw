@@ -8,6 +8,8 @@ const net = require("net");
 const {
   DEFAULT_GATEWAY_PORT,
   DEFAULT_DASHBOARD_PORT,
+  DEFAULT_NIM_PORT,
+  getConfiguredPorts,
   parsePortEnv,
   resolvePort,
 } = require("../bin/lib/preflight");
@@ -18,6 +20,7 @@ describe("parsePortEnv", () => {
   beforeEach(() => {
     saved.NEMOCLAW_GATEWAY_PORT = process.env.NEMOCLAW_GATEWAY_PORT;
     saved.NEMOCLAW_DASHBOARD_PORT = process.env.NEMOCLAW_DASHBOARD_PORT;
+    saved.NEMOCLAW_NIM_PORT = process.env.NEMOCLAW_NIM_PORT;
   });
 
   afterEach(() => {
@@ -30,6 +33,11 @@ describe("parsePortEnv", () => {
       delete process.env.NEMOCLAW_DASHBOARD_PORT;
     } else {
       process.env.NEMOCLAW_DASHBOARD_PORT = saved.NEMOCLAW_DASHBOARD_PORT;
+    }
+    if (saved.NEMOCLAW_NIM_PORT === undefined) {
+      delete process.env.NEMOCLAW_NIM_PORT;
+    } else {
+      process.env.NEMOCLAW_NIM_PORT = saved.NEMOCLAW_NIM_PORT;
     }
   });
 
@@ -84,6 +92,23 @@ describe("parsePortEnv", () => {
     // parseInt("8080.5") === 8080, which is valid — this is acceptable
     assert.equal(parsePortEnv("NEMOCLAW_GATEWAY_PORT", 8080), 8080);
   });
+
+  it("parses NEMOCLAW_NIM_PORT when set", () => {
+    process.env.NEMOCLAW_NIM_PORT = "8001";
+    assert.equal(parsePortEnv("NEMOCLAW_NIM_PORT", 8000), 8001);
+  });
+
+  it("returns NIM default when env var is unset", () => {
+    delete process.env.NEMOCLAW_NIM_PORT;
+    assert.equal(parsePortEnv("NEMOCLAW_NIM_PORT", 8000), 8000);
+  });
+
+  it("rejects invalid NEMOCLAW_NIM_PORT", () => {
+    process.env.NEMOCLAW_NIM_PORT = "notanumber";
+    const result = parsePortEnv("NEMOCLAW_NIM_PORT", 8000);
+    assert.equal(typeof result, "object");
+    assert.ok(result.error.includes("not a valid port"));
+  });
 });
 
 describe("default port constants", () => {
@@ -93,6 +118,10 @@ describe("default port constants", () => {
 
   it("dashboard default is 18789", () => {
     assert.equal(DEFAULT_DASHBOARD_PORT, 18789);
+  });
+
+  it("NIM default is 8000", () => {
+    assert.equal(DEFAULT_NIM_PORT, 8000);
   });
 });
 
@@ -150,6 +179,39 @@ describe("resolvePort", () => {
     } finally {
       await new Promise((resolve) => srv.close(resolve));
     }
+  });
+});
+
+describe("getConfiguredPorts includes NIM port (#684)", () => {
+  const saved = {};
+
+  beforeEach(() => {
+    saved.NEMOCLAW_NIM_PORT = process.env.NEMOCLAW_NIM_PORT;
+    saved.NEMOCLAW_GATEWAY_PORT = process.env.NEMOCLAW_GATEWAY_PORT;
+    saved.NEMOCLAW_DASHBOARD_PORT = process.env.NEMOCLAW_DASHBOARD_PORT;
+    delete process.env.NEMOCLAW_NIM_PORT;
+    delete process.env.NEMOCLAW_GATEWAY_PORT;
+    delete process.env.NEMOCLAW_DASHBOARD_PORT;
+  });
+
+  afterEach(() => {
+    for (const [k, v] of Object.entries(saved)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
+  });
+
+  it("returns nimPort defaulting to 8000", () => {
+    const ports = getConfiguredPorts();
+    assert.equal(ports.nimPort, 8000);
+    assert.equal(ports.gatewayPort, 8080);
+    assert.equal(ports.dashboardPort, 18789);
+  });
+
+  it("reads NEMOCLAW_NIM_PORT override", () => {
+    process.env.NEMOCLAW_NIM_PORT = "9000";
+    const ports = getConfiguredPorts();
+    assert.equal(ports.nimPort, 9000);
   });
 });
 
