@@ -9,9 +9,9 @@ const policies = require("../bin/lib/policies");
 
 describe("policies", () => {
   describe("listPresets", () => {
-    it("returns all 9 presets", () => {
+    it("returns all 10 presets", () => {
       const presets = policies.listPresets();
-      assert.equal(presets.length, 9);
+      assert.equal(presets.length, 10);
     });
 
     it("each preset has name and description", () => {
@@ -23,7 +23,7 @@ describe("policies", () => {
 
     it("returns expected preset names", () => {
       const names = policies.listPresets().map((p) => p.name).sort();
-      const expected = ["discord", "docker", "huggingface", "jira", "npm", "outlook", "pypi", "slack", "telegram"];
+      const expected = ["discord", "docker", "huggingface", "jira", "local-inference", "npm", "outlook", "pypi", "slack", "telegram"];
       assert.deepEqual(names, expected);
     });
   });
@@ -93,6 +93,33 @@ describe("policies", () => {
     it("shell-quotes sandbox name", () => {
       const cmd = policies.buildPolicyGetCommand("my-assistant");
       assert.equal(cmd, "openshell policy get --full 'my-assistant' 2>/dev/null");
+    });
+  });
+
+  describe("local-inference preset", () => {
+    it("loads and contains host.openshell.internal", () => {
+      const content = policies.loadPreset("local-inference");
+      assert.ok(content, "local-inference preset must exist");
+      const hosts = policies.getPresetEndpoints(content);
+      assert.ok(hosts.includes("host.openshell.internal"), "must allow host.openshell.internal");
+    });
+
+    it("allows Ollama port 11434 and vLLM port 8000", () => {
+      const content = policies.loadPreset("local-inference");
+      assert.ok(content.includes("port: 11434"), "must include Ollama port 11434");
+      assert.ok(content.includes("port: 8000"), "must include vLLM port 8000");
+    });
+
+    it("has a binaries section", () => {
+      const content = policies.loadPreset("local-inference");
+      assert.ok(content.includes("binaries:"), "must have binaries section (ref: #676)");
+    });
+
+    it("extracts valid network_policies entries", () => {
+      const content = policies.loadPreset("local-inference");
+      const entries = policies.extractPresetEntries(content);
+      assert.ok(entries, "must have extractable network_policies entries");
+      assert.ok(entries.includes("local_inference"), "must contain local_inference policy key");
     });
   });
 
