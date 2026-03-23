@@ -1151,7 +1151,9 @@ async function setupPolicies(sandboxName) {
 // ── Dashboard ────────────────────────────────────────────────────
 
 function printDashboard(sandboxName, model, provider) {
-  const nimStat = nim.nimStatus(sandboxName);
+  const sb = registry.getSandbox(sandboxName);
+  const nimPort = sb ? sb.nimPort : undefined;
+  const nimStat = nim.nimStatus(sandboxName, nimPort);
   const nimLabel = nimStat.running ? "running" : "not running";
 
   let providerLabel = provider;

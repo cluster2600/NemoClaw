@@ -289,4 +289,22 @@ describe("printDashboard", () => {
     assert.ok(output.includes("nemoclaw dev-box status"));
     assert.ok(output.includes("nemoclaw dev-box logs"));
   });
+
+  it("reads nimPort from registry for custom NIM port (#713)", () => {
+    // printDashboard now calls registry.getSandbox() to read nimPort,
+    // then passes it to nimStatus(). When no sandbox is registered
+    // (test default), nimPort is undefined → nimStatus uses default 8000.
+    // This test verifies no crash and correct fallback.
+    const logs = [];
+    const origLog = console.log;
+    console.log = (msg) => logs.push(msg);
+    try {
+      printDashboard("unregistered-sandbox", "model-x", "vllm-local");
+    } finally {
+      console.log = origLog;
+    }
+    const output = logs.join("\n");
+    assert.ok(output.includes("unregistered-sandbox"));
+    assert.ok(output.includes("NIM"));
+  });
 });

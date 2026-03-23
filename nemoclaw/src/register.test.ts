@@ -73,9 +73,47 @@ describe("plugin registration", () => {
     const api = createMockApi();
     register(api);
     const providerArg = vi.mocked(api.registerProvider).mock.calls[0][0];
-    expect(providerArg.models?.chat).toEqual([
-      expect.objectContaining({ id: "inference/nvidia/custom-model" }),
-    ]);
+    const chat = providerArg.models?.chat ?? [];
+    // Custom model is first (prepended because it's not in the default catalog)
+    expect(chat[0]).toEqual(expect.objectContaining({ id: "inference/nvidia/custom-model" }));
+    // Full catalog is also exposed so `openshell inference set` can switch (#733)
+    expect(chat.length).toBeGreaterThan(1);
+    expect(chat.some((m) => m.id === "inference/nvidia/nemotron-3-super-120b-a12b")).toBe(true);
+  });
+
+  it("exposes full catalog when onboarded with a catalog model (#733)", () => {
+    mockedLoadOnboardConfig.mockReturnValue({
+      endpointType: "build",
+      endpointUrl: "https://api.build.nvidia.com/v1",
+      ncpPartner: null,
+      model: "nvidia/nemotron-3-super-120b-a12b",
+      profile: "default",
+      credentialEnv: "NVIDIA_API_KEY",
+      onboardedAt: "2026-03-01T00:00:00.000Z",
+    });
+    const api = createMockApi();
+    register(api);
+    const providerArg = vi.mocked(api.registerProvider).mock.calls[0][0];
+    const chat = providerArg.models?.chat ?? [];
+    // Should have all catalog models, not just the onboarded one
+    expect(chat.length).toBeGreaterThanOrEqual(6);
+    // No duplicate for the onboarded model (it's already in the catalog)
+    const nemotronEntries = chat.filter((m) => m.id.includes("nemotron-3-super-120b"));
+    expect(nemotronEntries.length).toBe(1);
+    // Other models are available for switching
+    expect(chat.some((m) => m.id === "inference/moonshotai/kimi-k2.5")).toBe(true);
+    expect(chat.some((m) => m.id === "inference/qwen/qwen3.5-397b-a17b")).toBe(true);
+  });
+
+  it("returns full unprefixed catalog when no onboard config", () => {
+    mockedLoadOnboardConfig.mockReturnValue(null);
+    const api = createMockApi();
+    register(api);
+    const providerArg = vi.mocked(api.registerProvider).mock.calls[0][0];
+    const chat = providerArg.models?.chat ?? [];
+    // Without onboard, models use raw IDs (no inference/ prefix)
+    expect(chat[0]?.id).toBe("nvidia/nemotron-3-super-120b-a12b");
+    expect(chat.length).toBeGreaterThanOrEqual(6);
   });
 });
 

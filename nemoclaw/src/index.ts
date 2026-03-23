@@ -133,46 +133,94 @@ export interface NemoClawConfig {
   inferenceProvider: string;
 }
 
+/** Full model catalog — always exposed so `openshell inference set` can switch. */
+const MODEL_CATALOG: ModelProviderEntry[] = [
+  {
+    id: "nvidia/nemotron-3-super-120b-a12b",
+    label: "Nemotron 3 Super 120B (March 2026)",
+    contextWindow: 131072,
+    maxOutput: 8192,
+  },
+  {
+    id: "nvidia/llama-3.1-nemotron-ultra-253b-v1",
+    label: "Nemotron Ultra 253B",
+    contextWindow: 131072,
+    maxOutput: 4096,
+  },
+  {
+    id: "nvidia/llama-3.3-nemotron-super-49b-v1.5",
+    label: "Nemotron Super 49B v1.5",
+    contextWindow: 131072,
+    maxOutput: 4096,
+  },
+  {
+    id: "nvidia/nemotron-3-nano-30b-a3b",
+    label: "Nemotron 3 Nano 30B",
+    contextWindow: 131072,
+    maxOutput: 4096,
+  },
+  {
+    id: "moonshotai/kimi-k2.5",
+    label: "Kimi K2.5",
+    contextWindow: 131072,
+    maxOutput: 4096,
+  },
+  {
+    id: "qwen/qwen3.5-397b-a17b",
+    label: "Qwen3.5 397B A17B",
+    contextWindow: 131072,
+    maxOutput: 4096,
+  },
+];
+
+/**
+ * Build the model list for the provider catalog.
+ *
+ * When no onboard config exists we return the full catalog as-is.
+ * When onboarded, we expose *all* catalog models (so `openshell inference set`
+ * can switch) plus the onboarded model at the front. Duplicate entries are
+ * skipped (the onboarded model may already be in the catalog).
+ *
+ * Fixes #733: previously only the onboarded model was returned, which
+ * prevented switching to any other model after initial setup.
+ */
 function activeModelEntries(
   onboardCfg: ReturnType<typeof loadOnboardConfig>,
 ): ModelProviderEntry[] {
   if (!onboardCfg?.model) {
-    return [
-      {
-        id: "nvidia/nemotron-3-super-120b-a12b",
-        label: "Nemotron 3 Super 120B (March 2026)",
-        contextWindow: 131072,
-        maxOutput: 8192,
-      },
-      {
-        id: "nvidia/llama-3.1-nemotron-ultra-253b-v1",
-        label: "Nemotron Ultra 253B",
-        contextWindow: 131072,
-        maxOutput: 4096,
-      },
-      {
-        id: "nvidia/llama-3.3-nemotron-super-49b-v1.5",
-        label: "Nemotron Super 49B v1.5",
-        contextWindow: 131072,
-        maxOutput: 4096,
-      },
-      {
-        id: "nvidia/nemotron-3-nano-30b-a3b",
-        label: "Nemotron 3 Nano 30B",
-        contextWindow: 131072,
-        maxOutput: 4096,
-      },
-    ];
+    return MODEL_CATALOG;
   }
 
-  return [
-    {
-      id: `inference/${onboardCfg.model}`,
-      label: onboardCfg.model,
-      contextWindow: 131072,
-      maxOutput: 8192,
-    },
-  ];
+  // Prefix used by the managed inference route
+  const onboardedId = `inference/${onboardCfg.model}`;
+
+  // If the onboarded model is already in the catalog (by raw id), skip adding
+  // a duplicate.  Otherwise, prepend it so it becomes the default.
+  const alreadyInCatalog = MODEL_CATALOG.some(
+    (m) => m.id === onboardCfg.model || m.id === onboardedId,
+  );
+
+  const entries: ModelProviderEntry[] = alreadyInCatalog
+    ? []
+    : [
+        {
+          id: onboardedId,
+          label: onboardCfg.model,
+          contextWindow: 131072,
+          maxOutput: 8192,
+        },
+      ];
+
+  // Append full catalog, with the onboarded model's raw-id variant replaced
+  // by an inference/-prefixed version so the managed route handles it.
+  for (const m of MODEL_CATALOG) {
+    entries.push({
+      ...m,
+      id: `inference/${m.id}`,
+    });
+  }
+
+  return entries;
 }
 
 function registeredProviderForConfig(
