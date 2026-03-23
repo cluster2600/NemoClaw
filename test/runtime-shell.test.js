@@ -173,6 +173,38 @@ describe("shell runtime helpers", () => {
     assert.equal(result.stdout.trim(), "9.9.9.9");
   });
 
+  it("resolves DNS upstream for docker-desktop runtime using host nameserver", () => {
+    // Docker Desktop containers have 127.0.0.11 — should fall through to host resolv.conf
+    const result = runShell(
+      `source "${RUNTIME_SH}"; resolve_coredns_upstream $'nameserver 127.0.0.11' $'nameserver 8.8.8.8' docker-desktop`,
+    );
+
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout.trim(), "8.8.8.8");
+  });
+
+  it("resolves DNS upstream for plain docker runtime using host nameserver", () => {
+    const result = runShell(
+      `source "${RUNTIME_SH}"; resolve_coredns_upstream $'nameserver 127.0.0.11' $'nameserver 1.1.1.1' docker`,
+    );
+
+    assert.equal(result.status, 0);
+    assert.equal(result.stdout.trim(), "1.1.1.1");
+  });
+
+  it("skips Colima VM lookup for non-Colima runtimes", () => {
+    // For docker-desktop, should NOT try get_colima_vm_nameserver — go straight to host resolv.conf
+    const result = runShell(
+      `source "${RUNTIME_SH}";
+       get_colima_vm_nameserver() { printf '192.168.5.1\\n'; }
+       resolve_coredns_upstream $'nameserver 127.0.0.11' $'nameserver 9.9.9.9' docker-desktop`,
+    );
+
+    assert.equal(result.status, 0);
+    // Should use host nameserver, not the Colima VM one
+    assert.equal(result.stdout.trim(), "9.9.9.9");
+  });
+
   it("does not consume installer stdin when reading the Colima VM nameserver", () => {
     const result = runShell(
       `function colima() { cat > /dev/null || true; printf 'nameserver 100.100.100.100\\n'; }

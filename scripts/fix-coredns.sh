@@ -2,7 +2,7 @@
 # SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
-# Fix CoreDNS on local OpenShell gateways running under Colima.
+# Fix CoreDNS on local OpenShell gateways running inside Docker.
 #
 # Problem: k3s CoreDNS forwards to /etc/resolv.conf which inside the
 # CoreDNS pod resolves to 127.0.0.11 (Docker's embedded DNS). That
@@ -12,26 +12,49 @@
 # Fix: forward CoreDNS to the container's default gateway IP, which
 # is reachable from pods and routes DNS through Docker to the host.
 #
-# Run this after `openshell gateway start` on Colima setups.
+# Run this after `openshell gateway start` on any Docker-based setup.
+# Ref: https://github.com/NVIDIA/NemoClaw/issues/626
 #
-# Usage: ./scripts/fix-coredns.sh [gateway-name]
+# Usage: ./scripts/fix-coredns.sh [gateway-name] [runtime]
 
 set -euo pipefail
 
 GATEWAY_NAME="${1:-}"
+RUNTIME="${2:-unknown}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=./lib/runtime.sh
 . "$SCRIPT_DIR/lib/runtime.sh"
 
-COLIMA_SOCKET="$(find_colima_docker_socket || true)"
-
+# Set up DOCKER_HOST if not already configured.
+# For Colima: look for the Colima-specific socket.
+# For Docker Desktop: look for the Desktop socket.
+# For plain Docker: the default /var/run/docker.sock is used implicitly.
 if [ -z "${DOCKER_HOST:-}" ]; then
-  if [ -n "$COLIMA_SOCKET" ]; then
-    export DOCKER_HOST="unix://$COLIMA_SOCKET"
-  else
-    echo "Skipping CoreDNS patch: Colima socket not found."
-    exit 0
-  fi
+  case "$RUNTIME" in
+    colima)
+      COLIMA_SOCKET="$(find_colima_docker_socket || true)"
+      if [ -n "$COLIMA_SOCKET" ]; then
+        export DOCKER_HOST="unix://$COLIMA_SOCKET"
+      else
+        echo "Skipping CoreDNS patch: Colima socket not found."
+        exit 0
+      fi
+      ;;
+    docker-desktop)
+      DD_SOCKET="$(find_docker_desktop_socket || true)"
+      if [ -n "$DD_SOCKET" ]; then
+        export DOCKER_HOST="unix://$DD_SOCKET"
+      fi
+      # Fall through — Docker Desktop may also work via the default socket
+      ;;
+    docker)
+      # Plain Docker uses /var/run/docker.sock by default — no override needed
+      ;;
+    *)
+      echo "Skipping CoreDNS patch: unsupported runtime '$RUNTIME'."
+      exit 0
+      ;;
+  esac
 fi
 
 # Find the cluster container
@@ -48,10 +71,10 @@ fi
 
 CONTAINER_RESOLV_CONF="$(docker exec "$CLUSTER" cat /etc/resolv.conf 2>/dev/null || true)"
 HOST_RESOLV_CONF="$(cat /etc/resolv.conf 2>/dev/null || true)"
-UPSTREAM_DNS="$(resolve_coredns_upstream "$CONTAINER_RESOLV_CONF" "$HOST_RESOLV_CONF" "colima" || true)"
+UPSTREAM_DNS="$(resolve_coredns_upstream "$CONTAINER_RESOLV_CONF" "$HOST_RESOLV_CONF" "$RUNTIME" || true)"
 
 if [ -z "$UPSTREAM_DNS" ]; then
-  echo "ERROR: Could not determine a non-loopback DNS upstream for Colima."
+  echo "ERROR: Could not determine a non-loopback DNS upstream for $RUNTIME."
   exit 1
 fi
 

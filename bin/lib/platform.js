@@ -36,7 +36,10 @@ function isUnsupportedMacosRuntime(runtime, opts = {}) {
 }
 
 function shouldPatchCoredns(runtime) {
-  return runtime === "colima";
+  // k3s-inside-Docker has broken DNS on all Docker-based runtimes —
+  // CoreDNS forwards to 127.0.0.11 which is unreachable from pods.
+  // Ref: https://github.com/NVIDIA/NemoClaw/issues/626
+  return runtime === "colima" || runtime === "docker-desktop" || runtime === "docker";
 }
 
 function getColimaDockerSocketCandidates(opts = {}) {

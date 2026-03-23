@@ -156,10 +156,15 @@ describe("platform helpers", () => {
   });
 
   describe("shouldPatchCoredns", () => {
-    it("patches CoreDNS for Colima only", () => {
+    it("patches CoreDNS for all Docker-based runtimes", () => {
       assert.equal(shouldPatchCoredns("colima"), true);
-      assert.equal(shouldPatchCoredns("docker-desktop"), false);
-      assert.equal(shouldPatchCoredns("docker"), false);
+      assert.equal(shouldPatchCoredns("docker-desktop"), true);
+      assert.equal(shouldPatchCoredns("docker"), true);
+    });
+
+    it("does not patch CoreDNS for podman or unknown runtimes", () => {
+      assert.equal(shouldPatchCoredns("podman"), false);
+      assert.equal(shouldPatchCoredns("unknown"), false);
     });
   });
 });

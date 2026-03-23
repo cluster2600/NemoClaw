@@ -474,11 +474,13 @@ async function startGateway(gpu) {
     sleep(2);
   }
 
-  // CoreDNS fix — always run. k3s-inside-Docker has broken DNS on all platforms.
+  // CoreDNS fix — k3s-inside-Docker has broken DNS on all Docker-based
+  // runtimes: CoreDNS forwards to 127.0.0.11 which is unreachable from pods.
+  // Ref: https://github.com/NVIDIA/NemoClaw/issues/626
   const runtime = getContainerRuntime();
   if (shouldPatchCoredns(runtime)) {
-    console.log("  Patching CoreDNS for Colima...");
-    run(`bash "${path.join(SCRIPTS, "fix-coredns.sh")}" nemoclaw 2>&1 || true`, { ignoreError: true });
+    console.log(`  Patching CoreDNS for ${runtime}...`);
+    run(`bash "${path.join(SCRIPTS, "fix-coredns.sh")}" nemoclaw ${runtime} 2>&1 || true`, { ignoreError: true });
   }
   // Give DNS a moment to propagate
   sleep(5);
