@@ -473,7 +473,34 @@ pre_extract_openclaw() {
   rm -rf "$tmpdir"
 }
 
+# ---------------------------------------------------------------------------
+# detect_placeholder_package — check if a placeholder nemoclaw package from
+# the npm registry is globally installed and remove it before linking.
+# The placeholder (published by a third party) has no bin.nemoclaw field and
+# will shadow the real CLI if left in place.  See GH-737.
+# ---------------------------------------------------------------------------
+detect_placeholder_package() {
+  local pkg_json
+  local global_root
+  global_root="$(npm root -g 2>/dev/null)" || return 0
+  pkg_json="${global_root}/nemoclaw/package.json"
+  [[ -f "$pkg_json" ]] || return 0
+
+  # The real NemoClaw package.json has a "bin" field with "nemoclaw".
+  # The placeholder does not.
+  if ! node -e "
+    const pkg = require('$pkg_json');
+    if (!pkg.bin || !pkg.bin.nemoclaw) process.exit(1);
+  " 2>/dev/null; then
+    warn "Detected placeholder 'nemoclaw' package from npm registry (GH-737)."
+    warn "Removing it before installing the real NemoClaw CLI…"
+    npm uninstall -g nemoclaw 2>/dev/null || true
+  fi
+}
+
 install_nemoclaw() {
+  detect_placeholder_package
+
   if [[ -f "./package.json" ]] && grep -q '"name": "nemoclaw"' ./package.json 2>/dev/null; then
     info "NemoClaw package.json found in current directory — installing from source…"
     spin "Preparing OpenClaw package" bash -lc "$(declare -f pre_extract_openclaw); pre_extract_openclaw \"\$1\"" _ "$(pwd)" || \
@@ -506,6 +533,15 @@ install_nemoclaw() {
 # ---------------------------------------------------------------------------
 verify_nemoclaw() {
   if command_exists nemoclaw; then
+    # Ensure the binary is the real NemoClaw, not a placeholder stub (GH-737).
+    local version_output
+    version_output="$(nemoclaw --version 2>&1 || true)"
+    if [[ -z "$version_output" ]]; then
+      warn "nemoclaw binary exists but does not respond to --version."
+      warn "This may be a placeholder package from the npm registry (GH-737)."
+      warn "Remove it and reinstall:  npm uninstall -g nemoclaw && npm install -g git+https://github.com/NVIDIA/NemoClaw.git"
+      error "Installation failed: nemoclaw binary is not functional."
+    fi
     info "Verified: nemoclaw is available at $(command -v nemoclaw)"
     return 0
   fi

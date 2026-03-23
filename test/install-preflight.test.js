@@ -557,7 +557,8 @@ if [ "$1" = "run" ] && [ "$2" = "build" ]; then exit 0; fi
 if [ "$1" = "link" ]; then
   cat > "$NPM_PREFIX/bin/nemoclaw" <<'EOS'
 #!/usr/bin/env bash
-if [ "$1" = "onboard" ] || [ "$1" = "--version" ]; then exit 0; fi
+if [ "$1" = "onboard" ]; then exit 0; fi
+if [ "$1" = "--version" ]; then echo "v0.1.0-test"; exit 0; fi
 exit 0
 EOS
   chmod +x "$NPM_PREFIX/bin/nemoclaw"
@@ -637,7 +638,8 @@ if [ "$1" = "run" ] && [ "$2" = "build" ]; then exit 0; fi
 if [ "$1" = "link" ]; then
   cat > "$NPM_PREFIX/bin/nemoclaw" <<'EOS'
 #!/usr/bin/env bash
-if [ "$1" = "onboard" ] || [ "$1" = "--version" ]; then exit 0; fi
+if [ "$1" = "onboard" ]; then exit 0; fi
+if [ "$1" = "--version" ]; then echo "v0.1.0-test"; exit 0; fi
 exit 0
 EOS
   chmod +x "$NPM_PREFIX/bin/nemoclaw"
@@ -829,5 +831,181 @@ exit 0
     assert.equal(result.status, 0);
     assert.equal(fs.readlinkSync(shimPath), path.join(prefix, "bin", "nemoclaw"));
     assert.match(`${result.stdout}${result.stderr}`, /Created user-local shim/);
+  });
+
+  it("detects and removes a placeholder nemoclaw package before linking (#737)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-install-placeholder-"));
+    const fakeBin = path.join(tmp, "bin");
+    const prefix = path.join(tmp, "prefix");
+    const npmLog = path.join(tmp, "npm.log");
+    const globalRoot = path.join(prefix, "lib", "node_modules");
+    fs.mkdirSync(fakeBin);
+    fs.mkdirSync(path.join(prefix, "bin"), { recursive: true });
+
+    // Create a placeholder nemoclaw package (no bin field)
+    const placeholderDir = path.join(globalRoot, "nemoclaw");
+    fs.mkdirSync(placeholderDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(placeholderDir, "package.json"),
+      JSON.stringify({ name: "nemoclaw", version: "0.1.0", main: "index.js" }),
+    );
+    fs.writeFileSync(path.join(placeholderDir, "index.js"), "");
+
+    // Custom node stub that handles the placeholder bin.nemoclaw check
+    writeExecutable(
+      path.join(fakeBin, "node"),
+      `#!/usr/bin/env bash
+if [ "$1" = "--version" ] || [ "$1" = "-v" ]; then echo "v22.14.0"; exit 0; fi
+if [ "$1" = "-e" ]; then
+  if [[ "$2" == *"dependencies.openclaw"* ]]; then
+    echo "2026.3.11"
+    exit 0
+  fi
+  if [[ "$2" == *"pkg.bin"* ]] || [[ "$2" == *".bin"* ]]; then
+    # Placeholder package has no bin field — exit 1 to indicate missing bin
+    exit 1
+  fi
+  exit 0
+fi
+exit 99`,
+    );
+    // Custom npm stub that handles `root -g` for placeholder detection (GH-737)
+    writeExecutable(
+      path.join(fakeBin, "npm"),
+      `#!/usr/bin/env bash
+set -euo pipefail
+if [ "$1" = "--version" ]; then echo "10.9.2"; exit 0; fi
+if [ "$1" = "config" ] && [ "$2" = "get" ] && [ "$3" = "prefix" ]; then echo "$NPM_PREFIX"; exit 0; fi
+if [ "$1" = "root" ] && [ "$2" = "-g" ]; then echo "${globalRoot}"; exit 0; fi
+printf '%s\\n' "$*" >> "$NPM_LOG_PATH"
+if [ "$1" = "uninstall" ] && [ "$2" = "-g" ] && [ "$3" = "nemoclaw" ]; then
+  rm -rf "${globalRoot}/nemoclaw"
+  exit 0
+fi
+if [ "$1" = "pack" ]; then
+  tmpdir="$4"
+  mkdir -p "$tmpdir/package"
+  tar -czf "$tmpdir/openclaw-2026.3.11.tgz" -C "$tmpdir" package
+  exit 0
+fi
+if [ "$1" = "install" ]; then exit 0; fi
+if [ "$1" = "run" ] && [ "$2" = "build" ]; then exit 0; fi
+if [ "$1" = "link" ]; then
+  cat > "$NPM_PREFIX/bin/nemoclaw" <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "onboard" ]; then exit 0; fi
+if [ "$1" = "--version" ]; then echo "v0.1.0"; exit 0; fi
+exit 0
+EOS
+  chmod +x "$NPM_PREFIX/bin/nemoclaw"
+  exit 0
+fi
+echo "unexpected npm invocation: $*" >&2; exit 98`,
+    );
+
+    // Write a package.json that triggers the source-checkout path.
+    fs.writeFileSync(
+      path.join(tmp, "package.json"),
+      JSON.stringify({ name: "nemoclaw", version: "0.1.0" }, null, 2),
+    );
+    fs.mkdirSync(path.join(tmp, "nemoclaw"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmp, "nemoclaw", "package.json"),
+      JSON.stringify({ name: "nemoclaw-plugin", version: "0.1.0" }, null, 2),
+    );
+
+    const result = spawnSync("bash", [INSTALLER], {
+      cwd: tmp,
+      encoding: "utf-8",
+      env: {
+        ...process.env,
+        HOME: tmp,
+        PATH: `${fakeBin}:${TEST_SYSTEM_PATH}`,
+        NEMOCLAW_NON_INTERACTIVE: "1",
+        NPM_PREFIX: prefix,
+        NPM_LOG_PATH: npmLog,
+      },
+    });
+
+    const output = `${result.stdout}${result.stderr}`;
+    assert.equal(result.status, 0);
+    assert.match(output, /placeholder.*nemoclaw.*npm registry/i);
+    // Verify uninstall -g was called to remove the placeholder
+    const log = fs.readFileSync(npmLog, "utf-8");
+    assert.match(log, /^uninstall -g nemoclaw/m);
+  });
+
+  it("fails verification when nemoclaw binary does not respond to --version (#737)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-install-broken-bin-"));
+    const fakeBin = path.join(tmp, "bin");
+    const prefix = path.join(tmp, "prefix");
+    const globalRoot = path.join(prefix, "lib", "node_modules");
+    fs.mkdirSync(fakeBin);
+    fs.mkdirSync(path.join(prefix, "bin"), { recursive: true });
+    fs.mkdirSync(globalRoot, { recursive: true });
+
+    writeNodeStub(fakeBin);
+    writeNpmStub(
+      fakeBin,
+      `if [ "$1" = "root" ] && [ "$2" = "-g" ]; then
+  echo "${globalRoot}"
+  exit 0
+fi
+if [ "$1" = "pack" ]; then
+  tmpdir="$4"
+  mkdir -p "$tmpdir/package"
+  tar -czf "$tmpdir/openclaw-2026.3.11.tgz" -C "$tmpdir" package
+  exit 0
+fi
+if [ "$1" = "install" ]; then exit 0; fi
+if [ "$1" = "run" ] && [ "$2" = "build" ]; then exit 0; fi
+if [ "$1" = "link" ]; then
+  cat > "$NPM_PREFIX/bin/nemoclaw" <<'EOS'
+#!/usr/bin/env bash
+# Placeholder — no --version support, just exits silently
+exit 0
+EOS
+  chmod +x "$NPM_PREFIX/bin/nemoclaw"
+  exit 0
+fi`,
+    );
+
+    // Write a package.json that triggers the source-checkout path.
+    fs.writeFileSync(
+      path.join(tmp, "package.json"),
+      JSON.stringify({ name: "nemoclaw", version: "0.1.0" }, null, 2),
+    );
+    fs.mkdirSync(path.join(tmp, "nemoclaw"), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmp, "nemoclaw", "package.json"),
+      JSON.stringify({ name: "nemoclaw-plugin", version: "0.1.0" }, null, 2),
+    );
+
+    const result = spawnSync("bash", [INSTALLER], {
+      cwd: tmp,
+      encoding: "utf-8",
+      env: {
+        ...process.env,
+        HOME: tmp,
+        PATH: `${fakeBin}:${TEST_SYSTEM_PATH}`,
+        NEMOCLAW_NON_INTERACTIVE: "1",
+        NPM_PREFIX: prefix,
+      },
+    });
+
+    const output = `${result.stdout}${result.stderr}`;
+    assert.notEqual(result.status, 0);
+    assert.match(output, /does not respond to --version/);
+    assert.match(output, /placeholder.*npm registry/i);
+    assert.match(output, /GH-737/);
+  });
+
+  it("docs do not suggest bare npm install -g nemoclaw (#737)", () => {
+    const docsPath = path.join(__dirname, "..", "docs", "reference", "commands.md");
+    const content = fs.readFileSync(docsPath, "utf-8");
+    // Must NOT contain the bare package name install (which would pull the placeholder)
+    assert.doesNotMatch(content, /npm install -g nemoclaw(?!\.git)/);
+    // Must contain the git URL form
+    assert.match(content, /npm install -g git\+https:\/\/github\.com\/NVIDIA\/NemoClaw\.git/);
   });
 });

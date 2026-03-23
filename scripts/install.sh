@@ -448,6 +448,41 @@ pre_extract_openclaw() {
 
 # ── Install NemoClaw CLI ─────────────────────────────────────────
 
+# ---------------------------------------------------------------------------
+# detect_placeholder_package — check if a placeholder nemoclaw package from
+# the npm registry is globally installed and remove it before linking.
+# The placeholder (published by a third party) has no bin.nemoclaw field and
+# will shadow the real CLI if left in place.  See GH-737.
+# ---------------------------------------------------------------------------
+detect_placeholder_package() {
+  local pkg_json
+  local global_root
+  global_root="$(npm root -g 2>/dev/null)" || return 0
+  pkg_json="${global_root}/nemoclaw/package.json"
+  [ -f "$pkg_json" ] || return 0
+
+  # The real NemoClaw package.json has a "bin" field with "nemoclaw".
+  # The placeholder does not.
+  if ! node -e "
+    var pkg = require('$pkg_json');
+    if (!pkg.bin || !pkg.bin.nemoclaw) process.exit(1);
+  " 2>/dev/null; then
+    warn "Detected placeholder 'nemoclaw' package from npm registry (GH-737)."
+    warn "Removing it before installing the real NemoClaw CLI…"
+    $SUDO npm uninstall -g nemoclaw 2>/dev/null || true
+  fi
+}
+
+# Use sudo for npm link only when the global prefix directory is not writable
+# by the current user (e.g., system-managed nodesource installs to /usr).
+SUDO=""
+NPM_GLOBAL_PREFIX="$(npm config get prefix 2>/dev/null)" || true
+if [ -n "$NPM_GLOBAL_PREFIX" ] && [ ! -w "$NPM_GLOBAL_PREFIX" ] && [ "$(id -u)" -ne 0 ]; then
+  SUDO="sudo"
+fi
+
+detect_placeholder_package
+
 info "Installing nemoclaw CLI..."
 # Clone first so we can pre-extract openclaw before npm install (GH-503).
 # npm install -g git+https://... does this internally but we can't hook
@@ -457,13 +492,6 @@ rm -rf "$NEMOCLAW_SRC"
 mkdir -p "$(dirname "$NEMOCLAW_SRC")"
 git clone --depth 1 https://github.com/NVIDIA/NemoClaw.git "$NEMOCLAW_SRC"
 pre_extract_openclaw "$NEMOCLAW_SRC" || warn "Pre-extraction failed — npm install may fail if openclaw tarball is broken"
-# Use sudo for npm link only when the global prefix directory is not writable
-# by the current user (e.g., system-managed nodesource installs to /usr).
-SUDO=""
-NPM_GLOBAL_PREFIX="$(npm config get prefix 2>/dev/null)" || true
-if [ -n "$NPM_GLOBAL_PREFIX" ] && [ ! -w "$NPM_GLOBAL_PREFIX" ] && [ "$(id -u)" -ne 0 ]; then
-  SUDO="sudo"
-fi
 (cd "$NEMOCLAW_SRC" && npm install --ignore-scripts && cd nemoclaw && npm install --ignore-scripts && npm run build && cd .. && $SUDO npm link)
 
 if [ "$NEED_RESHIM" = true ]; then
@@ -498,6 +526,17 @@ if ! command -v nemoclaw > /dev/null 2>&1; then
     warn "You can try installing manually:"
     warn "  npm install -g git+https://github.com/NVIDIA/NemoClaw.git"
     exit 1
+  fi
+fi
+
+# Ensure the binary is the real NemoClaw, not a placeholder stub (GH-737).
+if command -v nemoclaw > /dev/null 2>&1; then
+  nemoclaw_version="$(nemoclaw --version 2>&1 || true)"
+  if [ -z "$nemoclaw_version" ]; then
+    warn "nemoclaw binary exists but does not respond to --version."
+    warn "This may be a placeholder package from the npm registry (GH-737)."
+    warn "Remove and reinstall:  npm uninstall -g nemoclaw && npm install -g git+https://github.com/NVIDIA/NemoClaw.git"
+    fail "Installation failed: nemoclaw binary is not functional."
   fi
 fi
 
