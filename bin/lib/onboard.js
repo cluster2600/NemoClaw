@@ -28,7 +28,7 @@ const {
   isUnsupportedMacosRuntime,
   shouldPatchCoredns,
 } = require("./platform");
-const { prompt, ensureApiKey, getCredential } = require("./credentials");
+const { prompt, ensureApiKey, getCredential, buildCredentialEnv } = require("./credentials");
 const registry = require("./registry");
 const nim = require("./nim");
 const policies = require("./policies");
@@ -550,16 +550,9 @@ async function createSandbox(gpu) {
   const resolvedDashPort = process.env._NEMOCLAW_RESOLVED_DASHBOARD_PORT || "18789";
   const chatUiUrl = process.env.CHAT_UI_URL || `http://127.0.0.1:${resolvedDashPort}`;
   const envArgs = [`CHAT_UI_URL=${shellQuote(chatUiUrl)}`];
-  if (process.env.NVIDIA_API_KEY) {
-    envArgs.push(`NVIDIA_API_KEY=${shellQuote(process.env.NVIDIA_API_KEY)}`);
-  }
-  const discordToken = getCredential("DISCORD_BOT_TOKEN") || process.env.DISCORD_BOT_TOKEN;
-  if (discordToken) {
-    envArgs.push(`DISCORD_BOT_TOKEN=${shellQuote(discordToken)}`);
-  }
-  const slackToken = getCredential("SLACK_BOT_TOKEN") || process.env.SLACK_BOT_TOKEN;
-  if (slackToken) {
-    envArgs.push(`SLACK_BOT_TOKEN=${shellQuote(slackToken)}`);
+  const credEnv = buildCredentialEnv(["NVIDIA_API_KEY", "DISCORD_BOT_TOKEN", "SLACK_BOT_TOKEN"]);
+  for (const [key, val] of Object.entries(credEnv)) {
+    envArgs.push(`${key}=${shellQuote(val)}`);
   }
 
   // Run without piping through awk — the pipe masked non-zero exit codes
@@ -798,9 +791,9 @@ async function setupNim(sandboxName, gpu) {
   if (provider === "nvidia-nim") {
     if (isNonInteractive()) {
       // In non-interactive mode, NVIDIA_API_KEY must be set via env var
-      if (!process.env.NVIDIA_API_KEY) {
+      if (!getCredential("NVIDIA_API_KEY")) {
         console.error("  NVIDIA_API_KEY is required for cloud provider in non-interactive mode.");
-        console.error("  Set it via: NVIDIA_API_KEY=nvapi-... nemoclaw onboard --non-interactive");
+        console.error("  Set it via env var or save to ~/.nemoclaw/credentials.json");
         process.exit(1);
       }
     } else {
@@ -822,12 +815,14 @@ async function setupInference(sandboxName, model, provider) {
   step(5, 7, "Setting up inference provider");
 
   if (provider === "nvidia-nim") {
-    // Create nvidia-nim provider
+    // Create nvidia-nim provider — pass credential via env to avoid
+    // exposing the API key in process arguments (visible in ps/proc).
+    const apiKey = getCredential("NVIDIA_API_KEY");
     run(
       `openshell provider create --name nvidia-nim --type openai ` +
-      `--credential ${shellQuote("NVIDIA_API_KEY=" + process.env.NVIDIA_API_KEY)} ` +
+      `--credential "NVIDIA_API_KEY=$_NEMOCLAW_CRED" ` +
       `--config "OPENAI_BASE_URL=https://integrate.api.nvidia.com/v1" 2>&1 || true`,
-      { ignoreError: true }
+      { ignoreError: true, env: { _NEMOCLAW_CRED: apiKey || "" } }
     );
     run(
       `openshell inference set --no-verify --provider nvidia-nim --model ${shellQuote(model)} 2>/dev/null || true`,
@@ -930,11 +925,11 @@ async function setupPolicies(sandboxName) {
     suggestions.push("telegram");
     console.log("  Auto-detected: TELEGRAM_BOT_TOKEN → suggesting telegram preset");
   }
-  if (getCredential("SLACK_BOT_TOKEN") || process.env.SLACK_BOT_TOKEN) {
+  if (getCredential("SLACK_BOT_TOKEN")) {
     suggestions.push("slack");
     console.log("  Auto-detected: SLACK_BOT_TOKEN → suggesting slack preset");
   }
-  if (getCredential("DISCORD_BOT_TOKEN") || process.env.DISCORD_BOT_TOKEN) {
+  if (getCredential("DISCORD_BOT_TOKEN")) {
     suggestions.push("discord");
     console.log("  Auto-detected: DISCORD_BOT_TOKEN → suggesting discord preset");
   }

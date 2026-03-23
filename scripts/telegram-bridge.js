@@ -21,6 +21,7 @@ const { execFileSync, spawn } = require("child_process");
 const crypto = require("crypto");
 const { resolveOpenshell } = require("../bin/lib/resolve-openshell");
 const { shellQuote, validateName } = require("../bin/lib/runner");
+const { getCredential } = require("../bin/lib/credentials");
 
 const OPENSHELL = resolveOpenshell();
 if (!OPENSHELL) {
@@ -28,8 +29,8 @@ if (!OPENSHELL) {
   process.exit(1);
 }
 
-const TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const API_KEY = process.env.NVIDIA_API_KEY;
+const TOKEN = getCredential("TELEGRAM_BOT_TOKEN");
+const API_KEY = getCredential("NVIDIA_API_KEY");
 const SANDBOX = process.env.SANDBOX_NAME || "nemoclaw";
 try { validateName(SANDBOX, "SANDBOX_NAME"); } catch (e) { console.error(e.message); process.exit(1); }
 const ALLOWED_CHATS = process.env.ALLOWED_CHAT_IDS

@@ -25,6 +25,39 @@ function getCredential(key) {
   return creds[key] || null;
 }
 
+/**
+ * All credential keys known to NemoClaw.  Every integration should use
+ * getCredential() to read these — never raw process.env access.
+ */
+const KNOWN_CREDENTIAL_KEYS = [
+  "NVIDIA_API_KEY",
+  "GITHUB_TOKEN",
+  "TELEGRAM_BOT_TOKEN",
+  "DISCORD_BOT_TOKEN",
+  "SLACK_BOT_TOKEN",
+];
+
+/**
+ * Build an env-var object containing every known credential that is
+ * currently available (via env override or credentials.json).
+ *
+ * Use this when spawning subprocesses so secrets travel via the
+ * environment — never as command-line arguments (visible in /proc,
+ * shell history, and log output).
+ *
+ * @param {string[]} [keys] — restrict to these keys; defaults to all.
+ * @returns {Record<string, string>}
+ */
+function buildCredentialEnv(keys) {
+  const list = keys || KNOWN_CREDENTIAL_KEYS;
+  const env = {};
+  for (const key of list) {
+    const val = getCredential(key);
+    if (val) env[key] = val;
+  }
+  return env;
+}
+
 function prompt(question) {
   return new Promise((resolve) => {
     const rl = readline.createInterface({ input: process.stdin, output: process.stderr });
@@ -125,9 +158,11 @@ async function ensureGithubToken() {
 module.exports = {
   CREDS_DIR,
   CREDS_FILE,
+  KNOWN_CREDENTIAL_KEYS,
   loadCredentials,
   saveCredential,
   getCredential,
+  buildCredentialEnv,
   prompt,
   ensureApiKey,
   ensureGithubToken,

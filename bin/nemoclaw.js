@@ -25,6 +25,7 @@ const {
   ensureApiKey,
   ensureGithubToken,
   getCredential,
+  buildCredentialEnv,
   isRepoPrivate,
 } = require("./lib/credentials");
 const registry = require("./lib/registry");
@@ -98,7 +99,7 @@ async function setup() {
 async function setupSpark() {
   await ensureApiKey();
   run(`sudo -E bash "${SCRIPTS}/setup-spark.sh"`, {
-    env: { NVIDIA_API_KEY: process.env.NVIDIA_API_KEY },
+    env: buildCredentialEnv(["NVIDIA_API_KEY"]),
   });
 }
 
@@ -171,15 +172,10 @@ async function deploy(instanceName) {
   run(`ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR ${qname} 'mkdir -p /home/ubuntu/nemoclaw'`);
   run(`rsync -az --delete --exclude node_modules --exclude .git --exclude src -e "ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR" "${ROOT}/scripts" "${ROOT}/Dockerfile" "${ROOT}/nemoclaw" "${ROOT}/nemoclaw-blueprint" "${ROOT}/bin" "${ROOT}/package.json" ${qname}:/home/ubuntu/nemoclaw/`);
 
-  const envLines = [`NVIDIA_API_KEY=${shellQuote(process.env.NVIDIA_API_KEY || "")}`];
-  const ghToken = process.env.GITHUB_TOKEN;
-  if (ghToken) envLines.push(`GITHUB_TOKEN=${shellQuote(ghToken)}`);
-  const tgToken = getCredential("TELEGRAM_BOT_TOKEN");
-  if (tgToken) envLines.push(`TELEGRAM_BOT_TOKEN=${shellQuote(tgToken)}`);
-  const discordToken = getCredential("DISCORD_BOT_TOKEN");
-  if (discordToken) envLines.push(`DISCORD_BOT_TOKEN=${shellQuote(discordToken)}`);
-  const slackToken = getCredential("SLACK_BOT_TOKEN");
-  if (slackToken) envLines.push(`SLACK_BOT_TOKEN=${shellQuote(slackToken)}`);
+  const credEnv = buildCredentialEnv();
+  const envLines = Object.entries(credEnv).map(
+    ([k, v]) => `${k}=${shellQuote(v)}`
+  );
   const envDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-env-"));
   const envTmp = path.join(envDir, "env");
   fs.writeFileSync(envTmp, envLines.join("\n") + "\n", { mode: 0o600 });
