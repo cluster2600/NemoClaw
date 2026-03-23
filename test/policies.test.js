@@ -10,6 +10,7 @@ describe("policies", () => {
     it("returns all 9 presets", () => {
       const presets = policies.listPresets();
       expect(presets.length).toBe(9);
+
     });
 
     it("each preset has name and description", () => {
@@ -36,6 +37,7 @@ describe("policies", () => {
         "telegram",
       ];
       expect(names).toEqual(expected);
+
     });
   });
 
