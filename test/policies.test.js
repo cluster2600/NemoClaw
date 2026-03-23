@@ -123,6 +123,141 @@ describe("policies", () => {
     });
   });
 
+  describe("validatePreset", () => {
+    it("returns true for content with binaries section", () => {
+      assert.equal(
+        policies.validatePreset("binaries:\n  - /usr/local/bin/openclaw", "test"),
+        true,
+      );
+    });
+
+    it("returns false and warns when binaries section is missing", () => {
+      const warnings = [];
+      const origWarn = console.warn;
+      console.warn = (...args) => warnings.push(args.join(" "));
+      try {
+        assert.equal(
+          policies.validatePreset("network_policies:\n  allow_all:\n    endpoints:", "no-bin"),
+          false,
+        );
+        assert.ok(warnings.length > 0, "should have logged a warning");
+        assert.ok(warnings[0].includes("no-bin"), "warning should name the preset");
+        assert.ok(warnings[0].includes("#676"), "warning should reference issue #676");
+      } finally {
+        console.warn = origWarn;
+      }
+    });
+  });
+
+  describe("extractPresetEntries", () => {
+    it("returns null when content has no network_policies section", () => {
+      assert.equal(policies.extractPresetEntries("binaries:\n  - /usr/bin/foo"), null);
+    });
+
+    it("extracts entries under network_policies key", () => {
+      const content = "preset:\n  name: test\nnetwork_policies:\n  allow_test:\n    endpoints:\n      - host: example.com";
+      const entries = policies.extractPresetEntries(content);
+      assert.ok(entries);
+      assert.ok(entries.includes("allow_test:"));
+      assert.ok(entries.includes("host: example.com"));
+    });
+
+    it("trims trailing whitespace from extracted entries", () => {
+      const content = "network_policies:\n  entry_one:\n    key: val  \n  ";
+      const entries = policies.extractPresetEntries(content);
+      assert.ok(entries);
+      assert.ok(!entries.endsWith(" "), "trailing whitespace should be trimmed");
+    });
+  });
+
+  describe("parseCurrentPolicy", () => {
+    it("returns empty string for null/empty input", () => {
+      assert.equal(policies.parseCurrentPolicy(null), "");
+      assert.equal(policies.parseCurrentPolicy(""), "");
+    });
+
+    it("returns raw content when no --- separator exists", () => {
+      const raw = "version: 1\nnetwork_policies:\n  allow_all:";
+      assert.equal(policies.parseCurrentPolicy(raw), raw);
+    });
+
+    it("returns trimmed content after --- separator", () => {
+      const raw = "Version: 1\nHash: abc123\n---\nversion: 1\nnetwork_policies:\n  rule:";
+      const result = policies.parseCurrentPolicy(raw);
+      assert.equal(result, "version: 1\nnetwork_policies:\n  rule:");
+    });
+
+    it("handles --- at the start of content", () => {
+      const raw = "---\nversion: 1";
+      assert.equal(policies.parseCurrentPolicy(raw), "version: 1");
+    });
+  });
+
+  describe("applyPreset sandbox name validation", () => {
+    it("rejects empty sandbox name", () => {
+      assert.throws(
+        () => policies.applyPreset("", "outlook"),
+        /Invalid or truncated sandbox name/,
+      );
+    });
+
+    it("rejects sandbox name longer than 63 chars", () => {
+      assert.throws(
+        () => policies.applyPreset("a".repeat(64), "outlook"),
+        /Invalid or truncated sandbox name/,
+      );
+    });
+
+    it("rejects sandbox name with uppercase letters", () => {
+      assert.throws(
+        () => policies.applyPreset("MyAssistant", "outlook"),
+        /Invalid or truncated sandbox name/,
+      );
+    });
+
+    it("rejects sandbox name with shell metacharacters", () => {
+      assert.throws(
+        () => policies.applyPreset("test; whoami", "outlook"),
+        /Invalid or truncated sandbox name/,
+      );
+    });
+
+    it("rejects sandbox name starting with hyphen", () => {
+      assert.throws(
+        () => policies.applyPreset("-leading", "outlook"),
+        /Invalid or truncated sandbox name/,
+      );
+    });
+
+    it("rejects sandbox name ending with hyphen", () => {
+      assert.throws(
+        () => policies.applyPreset("trailing-", "outlook"),
+        /Invalid or truncated sandbox name/,
+      );
+    });
+
+    it("returns false when preset does not exist", () => {
+      const errors = [];
+      const origError = console.error;
+      console.error = (...args) => errors.push(args.join(" "));
+      try {
+        const result = policies.applyPreset("valid-name", "nonexistent-preset");
+        assert.equal(result, false);
+        assert.ok(errors.some((e) => e.includes("Cannot load preset")));
+      } finally {
+        console.error = origError;
+      }
+    });
+  });
+
+  describe("getAppliedPresets", () => {
+    it("returns empty array for unknown sandbox", () => {
+      // getSandbox returns null for non-registered sandboxes
+      const presets = policies.getAppliedPresets("nonexistent-sandbox-xyz");
+      assert.deepEqual(presets, []);
+    });
+  });
+
   describe("preset YAML schema", () => {
     it("no preset has rules at NetworkPolicyRuleDef level", () => {
       // rules must be inside endpoints, not as sibling of endpoints/binaries

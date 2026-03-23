@@ -62,4 +62,63 @@ describe("inference selection config", () => {
       `${MANAGED_PROVIDER_ID}/nemotron-3-nano:30b`,
     );
   });
+
+  it("maps vllm-local to the sandbox inference route", () => {
+    assert.deepEqual(getProviderSelectionConfig("vllm-local"), {
+      endpointType: "custom",
+      endpointUrl: INFERENCE_ROUTE_URL,
+      ncpPartner: null,
+      model: "vllm-local",
+      profile: DEFAULT_ROUTE_PROFILE,
+      credentialEnv: DEFAULT_ROUTE_CREDENTIAL_ENV,
+      provider: "vllm-local",
+      providerLabel: "Local vLLM",
+    });
+  });
+
+  it("vllm-local uses explicit model when provided", () => {
+    const config = getProviderSelectionConfig("vllm-local", "my-custom-model");
+    assert.equal(config.model, "my-custom-model");
+    assert.equal(config.providerLabel, "Local vLLM");
+  });
+
+  it("nvidia-nim uses default cloud model when no model specified", () => {
+    const config = getProviderSelectionConfig("nvidia-nim");
+    assert.equal(config.model, "nvidia/nemotron-3-super-120b-a12b");
+    assert.equal(config.providerLabel, "NVIDIA Endpoint API");
+  });
+
+  it("returns null for unknown provider", () => {
+    assert.equal(getProviderSelectionConfig("unknown-provider"), null);
+    assert.equal(getProviderSelectionConfig("azure"), null);
+    assert.equal(getProviderSelectionConfig(""), null);
+  });
+
+  it("getOpenClawPrimaryModel defaults to ollama model for ollama-local", () => {
+    assert.equal(
+      getOpenClawPrimaryModel("ollama-local"),
+      `${MANAGED_PROVIDER_ID}/${DEFAULT_OLLAMA_MODEL}`,
+    );
+  });
+
+  it("getOpenClawPrimaryModel defaults to cloud model for nvidia-nim", () => {
+    assert.equal(
+      getOpenClawPrimaryModel("nvidia-nim"),
+      `${MANAGED_PROVIDER_ID}/nvidia/nemotron-3-super-120b-a12b`,
+    );
+  });
+
+  it("getOpenClawPrimaryModel defaults to cloud model for unknown provider", () => {
+    assert.equal(
+      getOpenClawPrimaryModel("something-else"),
+      `${MANAGED_PROVIDER_ID}/nvidia/nemotron-3-super-120b-a12b`,
+    );
+  });
+
+  it("getOpenClawPrimaryModel uses explicit model over defaults", () => {
+    assert.equal(
+      getOpenClawPrimaryModel("nvidia-nim", "custom/model-42b"),
+      `${MANAGED_PROVIDER_ID}/custom/model-42b`,
+    );
+  });
 });
