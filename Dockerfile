@@ -51,8 +51,12 @@ RUN mkdir -p /sandbox/.openclaw-data/agents/main/agent \
     && ln -s /sandbox/.openclaw-data/update-check.json /sandbox/.openclaw/update-check.json \
     && chown -R sandbox:sandbox /sandbox/.openclaw /sandbox/.openclaw-data
 
-# Install OpenClaw CLI
-RUN npm install -g openclaw@2026.3.11
+# Install OpenClaw CLI — version is a build arg so users can upgrade
+# without editing the Dockerfile.  Override at build time:
+#   docker build --build-arg OPENCLAW_VERSION=2026.3.22 ...
+# or via nemoclaw onboard with NEMOCLAW_OPENCLAW_VERSION env var.
+ARG OPENCLAW_VERSION=2026.3.11
+RUN npm install -g openclaw@${OPENCLAW_VERSION}
 
 # Install PyYAML for blueprint runner
 RUN pip3 install --break-system-packages pyyaml
@@ -79,6 +83,10 @@ RUN chmod +x /usr/local/bin/nemoclaw-start
 # nemoclaw onboard passes these at image build time.
 ARG NEMOCLAW_MODEL=nvidia/nemotron-3-super-120b-a12b
 ARG CHAT_UI_URL=http://127.0.0.1:18789
+# Extra allowed CORS origins (comma-separated).  Useful for headless
+# deployments accessed via SSH tunnel or LAN with a different origin.
+# Example: --build-arg NEMOCLAW_EXTRA_ORIGINS=http://192.168.1.50:3333,http://10.0.0.5:18789
+ARG NEMOCLAW_EXTRA_ORIGINS=
 # Unique per build to ensure each image gets a fresh auth token.
 # Pass --build-arg NEMOCLAW_BUILD_ID=$(date +%s) to bust the cache.
 ARG NEMOCLAW_BUILD_ID=default
@@ -96,10 +104,15 @@ import json, os, secrets; \
 from urllib.parse import urlparse; \
 model = '${NEMOCLAW_MODEL}'; \
 chat_ui_url = '${CHAT_UI_URL}'; \
+extra_origins_raw = '${NEMOCLAW_EXTRA_ORIGINS}'; \
 parsed = urlparse(chat_ui_url); \
 chat_origin = f'{parsed.scheme}://{parsed.netloc}' if parsed.scheme and parsed.netloc else 'http://127.0.0.1:18789'; \
 origins = ['http://127.0.0.1:18789']; \
 origins = list(dict.fromkeys(origins + [chat_origin])); \
+if extra_origins_raw: \
+    for o in extra_origins_raw.split(','): \
+        o = o.strip(); \
+        if o and o not in origins: origins.append(o); \
 config = { \
     'agents': {'defaults': {'model': {'primary': f'inference/{model}'}}}, \
     'models': {'mode': 'merge', 'providers': { \
@@ -124,7 +137,7 @@ config = { \
             'dangerouslyDisableDeviceAuth': True, \
             'allowedOrigins': origins, \
         }, \
-        'trustedProxies': ['127.0.0.1', '::1'], \
+        'trustedProxies': ['127.0.0.1', '::1', '10.0.0.0/8', '172.16.0.0/12', '192.168.0.0/16'], \
         'auth': {'token': secrets.token_hex(32)} \
     } \
 }; \

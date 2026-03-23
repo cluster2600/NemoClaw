@@ -507,6 +507,37 @@ function patchDockerfileModel(dockerfilePath, model) {
   fs.writeFileSync(dockerfilePath, content);
 }
 
+/**
+ * Patch the OPENCLAW_VERSION ARG default so users can upgrade OpenClaw
+ * without editing the Dockerfile.  Set NEMOCLAW_OPENCLAW_VERSION env var.
+ * Ref: https://github.com/NVIDIA/NemoClaw/issues/739
+ */
+function patchDockerfileVersion(dockerfilePath, version) {
+  if (!version) return;
+  let content = fs.readFileSync(dockerfilePath, "utf8");
+  content = content.replace(
+    /^ARG OPENCLAW_VERSION=.*/m,
+    `ARG OPENCLAW_VERSION=${version}`
+  );
+  fs.writeFileSync(dockerfilePath, content);
+}
+
+/**
+ * Patch the NEMOCLAW_EXTRA_ORIGINS ARG so headless deployments can add
+ * additional CORS origins (e.g. LAN addresses, SSH tunnel origins).
+ * Set NEMOCLAW_EXTRA_ORIGINS env var as comma-separated list.
+ * Ref: https://github.com/NVIDIA/NemoClaw/issues/739
+ */
+function patchDockerfileExtraOrigins(dockerfilePath, extraOrigins) {
+  if (!extraOrigins) return;
+  let content = fs.readFileSync(dockerfilePath, "utf8");
+  content = content.replace(
+    /^ARG NEMOCLAW_EXTRA_ORIGINS=.*/m,
+    `ARG NEMOCLAW_EXTRA_ORIGINS=${extraOrigins}`
+  );
+  fs.writeFileSync(dockerfilePath, content);
+}
+
 async function createSandbox(gpu, model) {
   step(4, 7, "Creating sandbox");
 
@@ -561,6 +592,18 @@ async function createSandbox(gpu, model) {
   // instead of the default. Without this, Ollama/vLLM/NIM users see the
   // wrong model in the OpenClaw TUI.  Ref: #628
   patchDockerfileModel(path.join(buildCtx, "Dockerfile"), model);
+
+  // Allow overriding the bundled OpenClaw version.  Ref: #739
+  patchDockerfileVersion(
+    path.join(buildCtx, "Dockerfile"),
+    process.env.NEMOCLAW_OPENCLAW_VERSION
+  );
+
+  // Allow extra CORS origins for headless / remote access.  Ref: #739
+  patchDockerfileExtraOrigins(
+    path.join(buildCtx, "Dockerfile"),
+    process.env.NEMOCLAW_EXTRA_ORIGINS
+  );
 
   // Create sandbox (use -- echo to avoid dropping into interactive shell)
   // Pass the base policy so sandbox starts in proxy mode (required for policy updates later)
@@ -1159,7 +1202,9 @@ module.exports = {
   hasStaleGateway,
   isSandboxReady,
   onboard,
+  patchDockerfileExtraOrigins,
   patchDockerfileModel,
+  patchDockerfileVersion,
   selectInferenceProvider,
   setupNim,
   writeSandboxConfigSyncFile,
