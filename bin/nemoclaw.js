@@ -20,6 +20,7 @@ const R = _useColor ? "\x1b[0m" : "";
 const RD = _useColor ? "\x1b[1;31m" : "";
 const YW = _useColor ? "\x1b[1;33m" : "";
 
+const { isVerbose, setVerbose, debug: logDebug } = require("./lib/logger");
 const { ROOT, SCRIPTS, run, runCapture, runInteractive, shellQuote, validateName } = require("./lib/runner");
 const {
   ensureApiKey,
@@ -419,6 +420,7 @@ function help() {
     nemoclaw status                  Show sandbox list and service status
 
   Troubleshooting:
+    nemoclaw --verbose <command>     Show debug output ${D}(or --debug, LOG_LEVEL=debug)${R}
     nemoclaw debug [--quick]         Collect diagnostics for bug reports
     nemoclaw debug --output FILE     Save diagnostics tarball for GitHub issues
 
@@ -438,7 +440,24 @@ function help() {
 
 // ── Dispatch ─────────────────────────────────────────────────────
 
-const [cmd, ...args] = process.argv.slice(2);
+// Strip --verbose / --debug before dispatch so commands don't see them.
+const VERBOSE_FLAGS = new Set(["--verbose", "--debug"]);
+const rawArgs = process.argv.slice(2);
+const filteredArgs = rawArgs.filter((a) => {
+  if (VERBOSE_FLAGS.has(a)) {
+    setVerbose(true);
+    return false;
+  }
+  return true;
+});
+
+const [cmd, ...args] = filteredArgs;
+
+if (isVerbose()) {
+  logDebug("nemoclaw %s", rawArgs.join(" "));
+  logDebug("node %s", process.version);
+  logDebug("platform %s %s", process.platform, process.arch);
+}
 
 (async () => {
   // No command → help

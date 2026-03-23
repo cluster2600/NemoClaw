@@ -4,6 +4,7 @@
 const { execSync, spawnSync } = require("child_process");
 const path = require("path");
 const { detectDockerHost } = require("./platform");
+const { debug } = require("./logger");
 
 const ROOT = path.resolve(__dirname, "..", "..");
 const SCRIPTS = path.join(ROOT, "scripts");
@@ -41,6 +42,7 @@ if (dockerHost) {
 }
 
 function run(cmd, opts = {}) {
+  debug("exec: %s", redactSecrets(cmd));
   const stdio = opts.stdio ?? ["ignore", "inherit", "inherit"];
   const result = spawnSync("bash", ["-c", cmd], {
     ...opts,
@@ -52,10 +54,12 @@ function run(cmd, opts = {}) {
     console.error(`  Command failed (exit ${result.status}): ${redactSecrets(cmd.slice(0, 80))}`);
     process.exit(result.status || 1);
   }
+  debug("exit: %d", result.status);
   return result;
 }
 
 function runInteractive(cmd, opts = {}) {
+  debug("exec (interactive): %s", redactSecrets(cmd));
   const stdio = opts.stdio ?? "inherit";
   const result = spawnSync("bash", ["-c", cmd], {
     ...opts,
@@ -67,20 +71,27 @@ function runInteractive(cmd, opts = {}) {
     console.error(`  Command failed (exit ${result.status}): ${redactSecrets(cmd.slice(0, 80))}`);
     process.exit(result.status || 1);
   }
+  debug("exit: %d", result.status);
   return result;
 }
 
 function runCapture(cmd, opts = {}) {
+  debug("capture: %s", redactSecrets(cmd));
   try {
-    return execSync(cmd, {
+    const output = execSync(cmd, {
       ...opts,
       encoding: "utf-8",
       cwd: ROOT,
       env: { ...process.env, ...opts.env },
       stdio: ["pipe", "pipe", "pipe"],
     }).trim();
+    debug("capture ok (%d chars)", output.length);
+    return output;
   } catch (err) {
-    if (opts.ignoreError) return "";
+    if (opts.ignoreError) {
+      debug("capture failed (ignored): %s", err.message && redactSecrets(err.message.split("\n")[0]));
+      return "";
+    }
     throw err;
   }
 }
