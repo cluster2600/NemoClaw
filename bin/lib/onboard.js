@@ -486,10 +486,26 @@ async function startGateway(gpu) {
   sleep(5);
 }
 
-// ── Step 3: Sandbox ──────────────────────────────────────────────
+// ── Step 4: Sandbox ──────────────────────────────────────────────
 
-async function createSandbox(gpu) {
-  step(3, 7, "Creating sandbox");
+/**
+ * Patch the NEMOCLAW_MODEL ARG default in a Dockerfile so that
+ * openclaw.json is generated with the user-selected model at build time.
+ * Only touches the ARG line — no other Dockerfile content is modified.
+ * Ref: https://github.com/NVIDIA/NemoClaw/issues/628
+ */
+function patchDockerfileModel(dockerfilePath, model) {
+  if (!model) return;
+  let content = fs.readFileSync(dockerfilePath, "utf8");
+  content = content.replace(
+    /^ARG NEMOCLAW_MODEL=.*/m,
+    `ARG NEMOCLAW_MODEL=${model}`
+  );
+  fs.writeFileSync(dockerfilePath, content);
+}
+
+async function createSandbox(gpu, model) {
+  step(4, 7, "Creating sandbox");
 
   const nameAnswer = await promptOrDefault(
     "  Sandbox name (lowercase, numbers, hyphens) [my-assistant]: ",
@@ -537,6 +553,11 @@ async function createSandbox(gpu) {
   run(`cp -r "${path.join(ROOT, "nemoclaw-blueprint")}" "${buildCtx}/nemoclaw-blueprint"`);
   run(`cp -r "${path.join(ROOT, "scripts")}" "${buildCtx}/scripts"`);
   run(`rm -rf "${buildCtx}/nemoclaw/node_modules"`, { ignoreError: true });
+
+  // Patch Dockerfile so openclaw.json is built with the user-selected model
+  // instead of the default. Without this, Ollama/vLLM/NIM users see the
+  // wrong model in the OpenClaw TUI.  Ref: #628
+  patchDockerfileModel(path.join(buildCtx, "Dockerfile"), model);
 
   // Create sandbox (use -- echo to avoid dropping into interactive shell)
   // Pass the base policy so sandbox starts in proxy mode (required for policy updates later)
@@ -629,14 +650,20 @@ async function createSandbox(gpu) {
   return sandboxName;
 }
 
-// ── Step 4: NIM ──────────────────────────────────────────────────
+// ── Step 3: Inference provider selection ─────────────────────────
+//
+// Pure selection logic — detects available providers, prompts the user,
+// and returns {model, provider}.  No side effects beyond starting Ollama
+// if the user picks it while it is not running.  Extracted from the old
+// setupNim() so that the selected model is known *before* the sandbox
+// image is built, allowing openclaw.json to contain the correct model.
+// Ref: https://github.com/NVIDIA/NemoClaw/issues/628
 
-async function setupNim(sandboxName, gpu) {
-  step(4, 7, "Configuring inference (NIM)");
+async function selectInferenceProvider(gpu) {
+  step(3, 7, "Selecting inference provider");
 
   let model = null;
   let provider = "nvidia-nim";
-  let nimContainer = null;
 
   // Detect local inference options
   const hasOllama = !!runCapture("command -v ollama", { ignoreError: true });
@@ -740,21 +767,7 @@ async function setupNim(sandboxName, gpu) {
           sel = models[midx] || models[0];
         }
         model = sel.name;
-
-        console.log(`  Pulling NIM image for ${model}...`);
-        nim.pullNimImage(model);
-
-        console.log("  Starting NIM container...");
-        nimContainer = nim.startNimContainer(sandboxName, model);
-
-        console.log("  Waiting for NIM to become healthy...");
-        if (!nim.waitForNimHealth()) {
-          console.error("  NIM failed to start. Falling back to cloud API.");
-          model = null;
-          nimContainer = null;
-        } else {
-          provider = "vllm-local";
-        }
+        provider = "vllm-local";
       }
     } else if (selected.key === "ollama") {
       if (!ollamaRunning) {
@@ -806,12 +819,44 @@ async function setupNim(sandboxName, gpu) {
     console.log(`  Using NVIDIA Endpoint API with model: ${model}`);
   }
 
-  registry.updateSandbox(sandboxName, { model, provider, nimContainer });
-
   return { model, provider };
 }
 
-// ── Step 5: Inference provider ───────────────────────────────────
+// Backward-compatible wrapper — older callers that import setupNim still work.
+// New code should use selectInferenceProvider() + setupInferenceBackend().
+async function setupNim(sandboxName, gpu) {
+  const { model, provider } = await selectInferenceProvider(gpu);
+  await setupInferenceBackend(sandboxName, model, provider, gpu);
+  return { model, provider };
+}
+
+// Start NIM container if NIM was selected and update the sandbox registry.
+async function setupInferenceBackend(sandboxName, model, provider, gpu) {
+  let nimContainer = null;
+
+  if (provider === "vllm-local" && gpu && gpu.nimCapable && EXPERIMENTAL) {
+    // NIM container setup — pull and start the container
+    const models = nim.listModels().filter((m) => m.minGpuMemoryMB <= gpu.totalMemoryMB);
+    const sel = models.find((m) => m.name === model);
+    if (sel) {
+      console.log(`  Pulling NIM image for ${model}...`);
+      nim.pullNimImage(model);
+
+      console.log("  Starting NIM container...");
+      nimContainer = nim.startNimContainer(sandboxName, model);
+
+      console.log("  Waiting for NIM to become healthy...");
+      if (!nim.waitForNimHealth()) {
+        console.error("  NIM failed to start. Falling back to cloud API.");
+        nimContainer = null;
+      }
+    }
+  }
+
+  registry.updateSandbox(sandboxName, { model, provider, nimContainer });
+}
+
+// ── Step 5: Inference routing ────────────────────────────────────
 
 async function setupInference(sandboxName, model, provider) {
   step(5, 7, "Setting up inference provider");
@@ -1064,8 +1109,12 @@ async function onboard(opts = {}) {
 
   const gpu = await preflight();
   await startGateway(gpu);
-  const sandboxName = await createSandbox(gpu);
-  const { model, provider } = await setupNim(sandboxName, gpu);
+  // Select model/provider BEFORE building the sandbox so that
+  // openclaw.json inside the image contains the correct model.
+  // Ref: https://github.com/NVIDIA/NemoClaw/issues/628
+  const { model, provider } = await selectInferenceProvider(gpu);
+  const sandboxName = await createSandbox(gpu, model);
+  await setupInferenceBackend(sandboxName, model, provider, gpu);
   await setupInference(sandboxName, model, provider);
   await setupOpenclaw(sandboxName, model, provider);
   await setupPolicies(sandboxName);
@@ -1079,6 +1128,8 @@ module.exports = {
   hasStaleGateway,
   isSandboxReady,
   onboard,
+  patchDockerfileModel,
+  selectInferenceProvider,
   setupNim,
   writeSandboxConfigSyncFile,
 };
