@@ -595,8 +595,75 @@ fi`,
     // install (no -g) and link must both have been called
     assert.match(log, /^install(?!\s+-g)/m);
     assert.match(log, /^link/m);
+    // npm link must use --ignore-scripts to avoid husky/prepare hook failures (GH-731)
+    assert.match(log, /^link --ignore-scripts/m);
     // the GitHub URL must NOT appear — this is a local install
     assert.doesNotMatch(log, new RegExp(GITHUB_INSTALL_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  });
+
+  it("npm link uses --ignore-scripts to avoid husky hook failures in git checkout (#731)", () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-install-731-"));
+    const fakeBin = path.join(tmp, "bin");
+    const prefix = path.join(tmp, "prefix");
+    const npmLog = path.join(tmp, "npm.log");
+    fs.mkdirSync(fakeBin);
+    fs.mkdirSync(path.join(prefix, "bin"), { recursive: true });
+
+    writeNodeStub(fakeBin);
+    writeExecutable(
+      path.join(fakeBin, "git"),
+      `#!/usr/bin/env bash
+if [ "$1" = "clone" ]; then
+  target="\${@: -1}"
+  mkdir -p "$target/nemoclaw"
+  echo '{"name":"nemoclaw","version":"0.1.0","dependencies":{"openclaw":"2026.3.11"}}' > "$target/package.json"
+  echo '{"name":"nemoclaw-plugin","version":"0.1.0"}' > "$target/nemoclaw/package.json"
+  exit 0
+fi
+exit 0
+`,
+    );
+    writeNpmStub(
+      fakeBin,
+      `printf '%s\\n' "$*" >> "$NPM_LOG_PATH"
+if [ "$1" = "pack" ]; then
+  tmpdir="$4"
+  mkdir -p "$tmpdir/package"
+  tar -czf "$tmpdir/openclaw-2026.3.11.tgz" -C "$tmpdir" package
+  exit 0
+fi
+if [ "$1" = "install" ]; then exit 0; fi
+if [ "$1" = "run" ] && [ "$2" = "build" ]; then exit 0; fi
+if [ "$1" = "link" ]; then
+  cat > "$NPM_PREFIX/bin/nemoclaw" <<'EOS'
+#!/usr/bin/env bash
+if [ "$1" = "onboard" ] || [ "$1" = "--version" ]; then exit 0; fi
+exit 0
+EOS
+  chmod +x "$NPM_PREFIX/bin/nemoclaw"
+  exit 0
+fi`,
+    );
+
+    const result = spawnSync("bash", [INSTALLER], {
+      cwd: tmp,
+      encoding: "utf-8",
+      env: {
+        ...process.env,
+        HOME: tmp,
+        PATH: `${fakeBin}:${TEST_SYSTEM_PATH}`,
+        NEMOCLAW_NON_INTERACTIVE: "1",
+        NPM_PREFIX: prefix,
+        NPM_LOG_PATH: npmLog,
+      },
+    });
+
+    assert.equal(result.status, 0);
+    const log = fs.readFileSync(npmLog, "utf-8");
+    // npm link in the GitHub clone path must also use --ignore-scripts (GH-731)
+    assert.match(log, /^link --ignore-scripts/m);
+    // install must use --ignore-scripts too
+    assert.match(log, /^install --ignore-scripts/m);
   });
 
   it("spin() non-TTY: dumps wrapped-command output and exits non-zero on failure", () => {

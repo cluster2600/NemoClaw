@@ -234,6 +234,7 @@ ORIGINAL_PATH="${PATH:-}"
 # Compare two semver strings (major.minor.patch). Returns 0 if $1 >= $2.
 version_gte() {
   local IFS=.
+  # shellcheck disable=SC2206
   local -a a=($1) b=($2)
   for i in 0 1 2; do
     local ai=${a[$i]:-0} bi=${b[$i]:-0}
@@ -479,7 +480,7 @@ install_nemoclaw() {
       warn "Pre-extraction failed — npm install may fail if openclaw tarball is broken"
     spin "Installing NemoClaw dependencies" npm install --ignore-scripts
     spin "Building NemoClaw plugin" bash -lc 'cd nemoclaw && npm install --ignore-scripts && npm run build'
-    spin "Linking NemoClaw CLI" npm link
+    spin "Linking NemoClaw CLI" npm link --ignore-scripts
   else
     info "Installing NemoClaw from GitHub…"
     # Clone first so we can pre-extract openclaw before npm install (GH-503).
@@ -493,7 +494,7 @@ install_nemoclaw() {
       warn "Pre-extraction failed — npm install may fail if openclaw tarball is broken"
     spin "Installing NemoClaw dependencies" bash -lc "cd \"$nemoclaw_src\" && npm install --ignore-scripts"
     spin "Building NemoClaw plugin" bash -lc "cd \"$nemoclaw_src\"/nemoclaw && npm install --ignore-scripts && npm run build"
-    spin "Linking NemoClaw CLI" bash -lc "cd \"$nemoclaw_src\" && npm link"
+    spin "Linking NemoClaw CLI" bash -lc "cd \"$nemoclaw_src\" && npm link --ignore-scripts"
   fi
 
   refresh_path

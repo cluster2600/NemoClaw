@@ -36,6 +36,18 @@ async function checkPortAvailable(port, opts) {
           `lsof -i :${p} -sTCP:LISTEN -P -n 2>/dev/null`,
           { ignoreError: true }
         );
+        // On Linux, lsof may need elevated privileges to see other users'
+        // processes (GH-726).  Retry with sudo if the first attempt returned
+        // nothing and we aren't already root.
+        if ((!lsofOut || !lsofOut.trim()) && process.getuid && process.getuid() !== 0) {
+          const hasSudo = runCapture("command -v sudo", { ignoreError: true });
+          if (hasSudo) {
+            lsofOut = runCapture(
+              `sudo -n lsof -i :${p} -sTCP:LISTEN -P -n 2>/dev/null`,
+              { ignoreError: true }
+            );
+          }
+        }
       }
     }
 

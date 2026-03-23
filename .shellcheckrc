@@ -1,0 +1,12 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# ShellCheck configuration for NemoClaw shell scripts.
+
+# SC2059: Don't use variables in printf format string — intentional for ANSI
+# color-code formatting (C_GREEN, C_BOLD, etc.) throughout the installer.
+disable=SC2059
+
+# SC1091: Not following sourced file — we source nvm.sh dynamically and
+# shellcheck cannot resolve the path at analysis time.
+disable=SC1091
