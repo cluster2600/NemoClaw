@@ -88,4 +88,82 @@ async function checkPortAvailable(port, opts) {
   });
 }
 
-module.exports = { checkPortAvailable };
+// ── Default ports ─────────────────────────────────────────────────
+// These can conflict with common services (e.g., 8080 → web proxies,
+// 8000 → Django/vLLM dev servers).  Users override via env vars.
+const DEFAULT_GATEWAY_PORT = 8080;
+const DEFAULT_DASHBOARD_PORT = 18789;
+
+/**
+ * Parse and validate a port from an env var override.
+ * Returns the default when the env var is unset or empty.
+ * Exits with an error when the value is not a valid port number.
+ */
+function parsePortEnv(envVar, defaultPort) {
+  const raw = (process.env[envVar] || "").trim();
+  if (!raw) return defaultPort;
+  const port = parseInt(raw, 10);
+  if (!Number.isFinite(port) || port < 1024 || port > 65535) {
+    return { error: `${envVar}=${raw} is not a valid port (must be 1024–65535)` };
+  }
+  return port;
+}
+
+/**
+ * Resolve the preferred port, auto-selecting an alternative when
+ * the default is occupied.
+ *
+ * Search strategy: try preferred port, then preferred+1 .. preferred+9.
+ * Returns { port, changed } where changed=true when an alternative was chosen.
+ *
+ * opts.checkPort — injectable port checker (for testing)
+ */
+async function resolvePort(preferred, opts) {
+  const o = opts || {};
+  const check = o.checkPort || checkPortAvailable;
+
+  const result = await check(preferred, o);
+  if (result.ok) {
+    return { port: preferred, changed: false };
+  }
+
+  // Try alternatives: preferred+1 through preferred+9
+  for (let offset = 1; offset <= 9; offset++) {
+    const candidate = preferred + offset;
+    if (candidate > 65535) break;
+    const alt = await check(candidate, o);
+    if (alt.ok) {
+      return { port: candidate, changed: true, original: preferred, blockedBy: result };
+    }
+  }
+
+  // No alternative found — return the original conflict for error reporting
+  return { port: preferred, changed: false, conflict: result };
+}
+
+/**
+ * Read configured ports from env vars, with defaults.
+ * Returns { gatewayPort, dashboardPort } or exits on invalid input.
+ */
+function getConfiguredPorts() {
+  const gw = parsePortEnv("NEMOCLAW_GATEWAY_PORT", DEFAULT_GATEWAY_PORT);
+  if (typeof gw === "object" && gw.error) {
+    console.error(`  !! ${gw.error}`);
+    process.exit(1);
+  }
+  const dash = parsePortEnv("NEMOCLAW_DASHBOARD_PORT", DEFAULT_DASHBOARD_PORT);
+  if (typeof dash === "object" && dash.error) {
+    console.error(`  !! ${dash.error}`);
+    process.exit(1);
+  }
+  return { gatewayPort: gw, dashboardPort: dash };
+}
+
+module.exports = {
+  DEFAULT_DASHBOARD_PORT,
+  DEFAULT_GATEWAY_PORT,
+  checkPortAvailable,
+  getConfiguredPorts,
+  parsePortEnv,
+  resolvePort,
+};

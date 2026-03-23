@@ -32,7 +32,7 @@ const { prompt, ensureApiKey, getCredential } = require("./credentials");
 const registry = require("./registry");
 const nim = require("./nim");
 const policies = require("./policies");
-const { checkPortAvailable } = require("./preflight");
+const { checkPortAvailable, getConfiguredPorts, resolvePort } = require("./preflight");
 const EXPERIMENTAL = process.env.NEMOCLAW_EXPERIMENTAL === "1";
 const USE_COLOR = !process.env.NO_COLOR && !!process.stdout.isTTY;
 const DIM = USE_COLOR ? "\x1b[2m" : "";
@@ -361,19 +361,24 @@ async function preflight() {
   const gwInfo = runCapture("openshell gateway info -g nemoclaw 2>/dev/null", { ignoreError: true });
   if (hasStaleGateway(gwInfo)) {
     console.log("  Cleaning up previous NemoClaw session...");
-    run("openshell forward stop 18789 2>/dev/null || true", { ignoreError: true });
+    const staleDashPort = process.env.NEMOCLAW_DASHBOARD_PORT || "18789";
+    run(`openshell forward stop ${staleDashPort} 2>/dev/null || true`, { ignoreError: true });
     run("openshell gateway destroy -g nemoclaw 2>/dev/null || true", { ignoreError: true });
     console.log("  ✓ Previous session cleaned up");
   }
 
-  // Required ports — gateway (8080) and dashboard (18789)
+  // Required ports — configurable via NEMOCLAW_GATEWAY_PORT / NEMOCLAW_DASHBOARD_PORT
+  const { gatewayPort, dashboardPort } = getConfiguredPorts();
   const requiredPorts = [
-    { port: 8080, label: "OpenShell gateway" },
-    { port: 18789, label: "NemoClaw dashboard" },
+    { port: gatewayPort, label: "OpenShell gateway", envVar: "NEMOCLAW_GATEWAY_PORT" },
+    { port: dashboardPort, label: "NemoClaw dashboard", envVar: "NEMOCLAW_DASHBOARD_PORT" },
   ];
-  for (const { port, label } of requiredPorts) {
-    const portCheck = await checkPortAvailable(port);
-    if (!portCheck.ok) {
+  const resolvedPorts = {};
+  for (const { port, label, envVar } of requiredPorts) {
+    const resolved = await resolvePort(port);
+    if (resolved.conflict) {
+      // Neither the preferred port nor any alternative is free
+      const portCheck = resolved.conflict;
       console.error("");
       console.error(`  !! Port ${port} is not available.`);
       console.error(`     ${label} needs this port.`);
@@ -395,11 +400,21 @@ async function preflight() {
         console.error(`     Run: lsof -i :${port} -sTCP:LISTEN`);
       }
       console.error("");
+      console.error(`     You can also set ${envVar}=<port> to use a different port.`);
       console.error(`     Detail: ${portCheck.reason}`);
       process.exit(1);
     }
-    console.log(`  ✓ Port ${port} available (${label})`);
+    if (resolved.changed) {
+      console.log(`  ⚠ Port ${resolved.original} in use — using ${resolved.port} instead (${label})`);
+      console.log(`    To make permanent: export ${envVar}=${resolved.port}`);
+    } else {
+      console.log(`  ✓ Port ${resolved.port} available (${label})`);
+    }
+    resolvedPorts[envVar] = resolved.port;
   }
+  // Store resolved ports for downstream steps
+  process.env._NEMOCLAW_RESOLVED_GATEWAY_PORT = String(resolvedPorts.NEMOCLAW_GATEWAY_PORT);
+  process.env._NEMOCLAW_RESOLVED_DASHBOARD_PORT = String(resolvedPorts.NEMOCLAW_DASHBOARD_PORT);
 
   // GPU
   const gpu = nim.detectGpu();
@@ -532,7 +547,8 @@ async function createSandbox(gpu) {
   // --gpu is intentionally omitted. See comment in startGateway().
 
   console.log(`  Creating sandbox '${sandboxName}' (this takes a few minutes on first run)...`);
-  const chatUiUrl = process.env.CHAT_UI_URL || 'http://127.0.0.1:18789';
+  const resolvedDashPort = process.env._NEMOCLAW_RESOLVED_DASHBOARD_PORT || "18789";
+  const chatUiUrl = process.env.CHAT_UI_URL || `http://127.0.0.1:${resolvedDashPort}`;
   const envArgs = [`CHAT_UI_URL=${shellQuote(chatUiUrl)}`];
   if (process.env.NVIDIA_API_KEY) {
     envArgs.push(`NVIDIA_API_KEY=${shellQuote(process.env.NVIDIA_API_KEY)}`);
@@ -600,12 +616,13 @@ async function createSandbox(gpu) {
     process.exit(1);
   }
 
-  // Release any stale forward on port 18789 before claiming it for the new sandbox.
+  // Release any stale forward on the dashboard port before claiming it for the new sandbox.
   // A previous onboard run may have left the port forwarded to a different sandbox,
   // which would silently prevent the new sandbox's dashboard from being reachable.
-  run(`openshell forward stop 18789 2>/dev/null || true`, { ignoreError: true });
+  const dashPort = process.env._NEMOCLAW_RESOLVED_DASHBOARD_PORT || "18789";
+  run(`openshell forward stop ${dashPort} 2>/dev/null || true`, { ignoreError: true });
   // Forward dashboard port to the new sandbox
-  run(`openshell forward start --background 18789 "${sandboxName}"`, { ignoreError: true });
+  run(`openshell forward start --background ${dashPort} "${sandboxName}"`, { ignoreError: true });
 
   // Register only after confirmed ready — prevents phantom entries
   registry.registerSandbox({
