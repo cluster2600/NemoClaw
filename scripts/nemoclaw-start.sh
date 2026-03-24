@@ -54,6 +54,15 @@ elif [ "${NEMOCLAW_CAPS_DROPPED:-}" != "1" ]; then
   echo "[SECURITY WARNING] capsh not available — running with default capabilities" >&2
 fi
 
+# Fork bomb protection: set process limit if the container runtime
+# didn't set one. This is a safety net — the limit should ideally
+# be enforced at the container level via --pids-limit.
+# Ref: https://github.com/NVIDIA/NemoClaw/issues/809
+current_nproc=$(ulimit -u 2>/dev/null || echo "unlimited")
+if [ "$current_nproc" = "unlimited" ]; then
+  ulimit -u 512 2>/dev/null || true
+fi
+
 # Filter out self-invocation: openshell sandbox create passes "nemoclaw-start"
 # as the command, but since this script is now the ENTRYPOINT, receiving our
 # own name as $1 would cause infinite recursion via the NEMOCLAW_CMD exec path.
