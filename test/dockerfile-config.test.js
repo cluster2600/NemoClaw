@@ -214,3 +214,81 @@ describe("Dockerfile config: sandbox home directory permissions (#622)", () => {
     assert.match(content, /chmod\s+755/, "Must repair to 755");
   });
 });
+
+// ---------------------------------------------------------------------------
+// Build toolchain for native Node.js addons (#724)
+// ---------------------------------------------------------------------------
+
+describe("Dockerfile config: build toolchain for native addons (#724)", () => {
+  it("Dockerfile installs build-essential for native module compilation", () => {
+    const repoDockerfile = path.join(__dirname, "..", "Dockerfile");
+    const content = fs.readFileSync(repoDockerfile, "utf8");
+    assert.match(
+      content,
+      /build-essential/,
+      "Dockerfile must install build-essential for native addon compilation on aarch64"
+    );
+  });
+
+  it("Dockerfile installs python3-dev for node-gyp", () => {
+    const repoDockerfile = path.join(__dirname, "..", "Dockerfile");
+    const content = fs.readFileSync(repoDockerfile, "utf8");
+    assert.match(
+      content,
+      /python3-dev/,
+      "Dockerfile must install python3-dev for node-gyp native builds"
+    );
+  });
+
+  it("Dockerfile removes build toolchain after npm installs to save image size", () => {
+    const repoDockerfile = path.join(__dirname, "..", "Dockerfile");
+    const content = fs.readFileSync(repoDockerfile, "utf8");
+    assert.match(
+      content,
+      /apt-get purge.*build-essential/,
+      "Dockerfile must purge build-essential after native addons are compiled"
+    );
+  });
+
+  it("test Dockerfile also installs build-essential", () => {
+    const testDockerfile = path.join(__dirname, "Dockerfile.sandbox");
+    const content = fs.readFileSync(testDockerfile, "utf8");
+    assert.match(
+      content,
+      /build-essential/,
+      "Test Dockerfile must also install build-essential"
+    );
+  });
+
+  it("test Dockerfile removes build toolchain after compilation", () => {
+    const testDockerfile = path.join(__dirname, "Dockerfile.sandbox");
+    const content = fs.readFileSync(testDockerfile, "utf8");
+    assert.match(
+      content,
+      /apt-get purge.*build-essential/,
+      "Test Dockerfile must also purge build-essential after compilation"
+    );
+  });
+
+  it("build tools are installed before OpenClaw npm install", () => {
+    const repoDockerfile = path.join(__dirname, "..", "Dockerfile");
+    const content = fs.readFileSync(repoDockerfile, "utf8");
+    const buildEssentialIdx = content.indexOf("build-essential");
+    const npmInstallIdx = content.indexOf("npm install -g openclaw");
+    assert.ok(
+      buildEssentialIdx < npmInstallIdx,
+      "build-essential must be installed before npm install -g openclaw"
+    );
+  });
+
+  it("build tools are purged after the last npm install", () => {
+    const repoDockerfile = path.join(__dirname, "..", "Dockerfile");
+    const content = fs.readFileSync(repoDockerfile, "utf8");
+    const lastNpmInstall = content.lastIndexOf("npm install");
+    const purgeIdx = content.indexOf("apt-get purge");
+    assert.ok(
+      purgeIdx > lastNpmInstall,
+      "build-essential purge must come after the last npm install"
+    );
+  });
+});

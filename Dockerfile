@@ -12,10 +12,15 @@ FROM node:22-slim
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# build-essential + python3-dev are required for native Node.js addons
+# (@whiskeysockets/baileys/libsignal-node, @matrix-org/matrix-sdk-crypto-nodejs,
+# protobufjs, koffi) that lack prebuilt binaries on aarch64.
+# Ref: https://github.com/NVIDIA/NemoClaw/issues/724
 RUN apt-get update && apt-get install -y --no-install-recommends \
-        python3 python3-pip python3-venv \
+        python3 python3-pip python3-venv python3-dev \
         curl git ca-certificates \
         iproute2 \
+        build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Create sandbox user (matches OpenShell convention)
@@ -74,6 +79,11 @@ COPY nemoclaw-blueprint/ /opt/nemoclaw-blueprint/
 # Install runtime dependencies only (no devDependencies, no build step)
 WORKDIR /opt/nemoclaw
 RUN npm install --omit=dev
+
+# Remove build toolchain — no longer needed after native addons are compiled.
+# Saves ~200 MB in the final image.  Ref: #724
+RUN apt-get purge -y --auto-remove build-essential python3-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set up blueprint for local resolution
 RUN mkdir -p /sandbox/.nemoclaw/blueprints/0.1.0 \
