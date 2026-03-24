@@ -49,14 +49,26 @@ function exec(cmd, opts = {}) {
  * Detect the NemoClaw installation type and source directory.
  *
  * Returns { type: "source" | "global" | "unknown", sourceDir: string | null }
+ *
+ * @param {object} [deps] - Injectable dependencies for testing.
+ * @param {function} [deps.existsSync] - Replacement for fs.existsSync.
+ * @param {function} [deps.readFileSync] - Replacement for fs.readFileSync.
+ * @param {function} [deps.exec] - Replacement for module-level exec().
+ * @param {string} [deps.root] - Override for the CWD-based root directory.
+ * @param {string} [deps.defaultSourceDir] - Override for DEFAULT_SOURCE_DIR.
  */
-function detectInstallType() {
+function detectInstallType(deps = {}) {
+  const _existsSync = deps.existsSync ?? fs.existsSync;
+  const _readFileSync = deps.readFileSync ?? fs.readFileSync;
+  const _exec = deps.exec ?? exec;
+  const root = deps.root ?? path.resolve(__dirname, "..", "..");
+  const defaultSourceDir = deps.defaultSourceDir ?? DEFAULT_SOURCE_DIR;
+
   // 1. Check if running from a git checkout (development / source install in CWD)
-  const root = path.resolve(__dirname, "..", "..");
   const rootPkg = path.join(root, "package.json");
-  if (fs.existsSync(path.join(root, ".git")) && fs.existsSync(rootPkg)) {
+  if (_existsSync(path.join(root, ".git")) && _existsSync(rootPkg)) {
     try {
-      const pkg = JSON.parse(fs.readFileSync(rootPkg, "utf8"));
+      const pkg = JSON.parse(_readFileSync(rootPkg, "utf8"));
       if (pkg.name === "nemoclaw") {
         debug("update: source install detected at %s", root);
         return { type: "source", sourceDir: root };
@@ -65,17 +77,17 @@ function detectInstallType() {
   }
 
   // 2. Check the default source directory created by the installer
-  const defaultPkg = path.join(DEFAULT_SOURCE_DIR, "package.json");
-  if (fs.existsSync(path.join(DEFAULT_SOURCE_DIR, ".git")) && fs.existsSync(defaultPkg)) {
-    debug("update: source install detected at %s", DEFAULT_SOURCE_DIR);
-    return { type: "source", sourceDir: DEFAULT_SOURCE_DIR };
+  const defaultPkg = path.join(defaultSourceDir, "package.json");
+  if (_existsSync(path.join(defaultSourceDir, ".git")) && _existsSync(defaultPkg)) {
+    debug("update: source install detected at %s", defaultSourceDir);
+    return { type: "source", sourceDir: defaultSourceDir };
   }
 
   // 3. Check if installed globally via npm
-  const npmRoot = exec("npm root -g");
+  const npmRoot = _exec("npm root -g");
   if (npmRoot) {
     const globalPkg = path.join(npmRoot, "nemoclaw", "package.json");
-    if (fs.existsSync(globalPkg)) {
+    if (_existsSync(globalPkg)) {
       debug("update: global npm install detected");
       return { type: "global", sourceDir: null };
     }
@@ -87,9 +99,13 @@ function detectInstallType() {
 /**
  * Fetch the latest remote commit SHA without cloning.
  * Returns the short SHA or null on failure.
+ *
+ * @param {object} [deps] - Injectable dependencies for testing.
+ * @param {function} [deps.exec] - Replacement for module-level exec().
  */
-function fetchRemoteHead() {
-  const out = exec(`git ls-remote ${REPO_URL} refs/heads/main`);
+function fetchRemoteHead(deps = {}) {
+  const _exec = deps.exec ?? exec;
+  const out = _exec(`git ls-remote ${REPO_URL} refs/heads/main`);
   if (!out) return null;
   const sha = out.split(/\s/)[0];
   return sha ? sha.slice(0, 12) : null;
@@ -117,16 +133,26 @@ function readVersion(dir) {
 /**
  * Check whether an update is available.
  * Returns { current, remote, updateAvailable, currentVersion }.
+ *
+ * @param {object} install - The installation info from detectInstallType().
+ * @param {object} [deps] - Injectable dependencies for testing.
+ * @param {function} [deps.fetchRemoteHead] - Override fetchRemoteHead().
+ * @param {function} [deps.getLocalHead] - Override getLocalHead().
+ * @param {function} [deps.readVersion] - Override readVersion().
  */
-function checkForUpdate(install) {
-  const remote = fetchRemoteHead();
+function checkForUpdate(install, deps = {}) {
+  const _fetchRemoteHead = deps.fetchRemoteHead ?? fetchRemoteHead;
+  const _getLocalHead = deps.getLocalHead ?? getLocalHead;
+  const _readVersion = deps.readVersion ?? readVersion;
+
+  const remote = _fetchRemoteHead();
   if (!remote) {
     return { error: "Could not reach GitHub to check for updates." };
   }
 
   if (install.type === "source" && install.sourceDir) {
-    const local = getLocalHead(install.sourceDir);
-    const version = readVersion(install.sourceDir);
+    const local = _getLocalHead(install.sourceDir);
+    const version = _readVersion(install.sourceDir);
     return {
       current: local,
       remote,
@@ -139,7 +165,7 @@ function checkForUpdate(install) {
   return {
     current: null,
     remote,
-    currentVersion: readVersion(path.resolve(__dirname, "..", "..")),
+    currentVersion: _readVersion(path.resolve(__dirname, "..", "..")),
     updateAvailable: true, // Cannot compare — always offer update
   };
 }
