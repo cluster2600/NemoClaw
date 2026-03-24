@@ -949,30 +949,35 @@ async function setupNim(sandboxName, gpu) {
 }
 
 // Start NIM container if NIM was selected and update the sandbox registry.
-async function setupInferenceBackend(sandboxName, model, provider, gpu) {
-  let nimContainer = null;
-  const nimPort = Number(process.env._NEMOCLAW_RESOLVED_NIM_PORT) || 8000;
+async function setupInferenceBackend(sandboxName, model, provider, gpu, deps) {
+  const _nim = (deps && deps.nim) || nim;
+  const _registry = (deps && deps.registry) || registry;
+  const _env = (deps && deps.env) || process.env;
+  const _experimental = deps && deps.experimental !== undefined ? deps.experimental : EXPERIMENTAL;
 
-  if (provider === "vllm-local" && gpu && gpu.nimCapable && EXPERIMENTAL) {
+  let nimContainer = null;
+  const nimPort = Number(_env._NEMOCLAW_RESOLVED_NIM_PORT) || 8000;
+
+  if (provider === "vllm-local" && gpu && gpu.nimCapable && _experimental) {
     // NIM container setup — pull and start the container
-    const models = nim.listModels().filter((m) => m.minGpuMemoryMB <= gpu.totalMemoryMB);
+    const models = _nim.listModels().filter((m) => m.minGpuMemoryMB <= gpu.totalMemoryMB);
     const sel = models.find((m) => m.name === model);
     if (sel) {
       console.log(`  Pulling NIM image for ${model}...`);
-      nim.pullNimImage(model);
+      _nim.pullNimImage(model);
 
       console.log("  Starting NIM container...");
-      nimContainer = nim.startNimContainer(sandboxName, model, nimPort);
+      nimContainer = _nim.startNimContainer(sandboxName, model, nimPort);
 
       console.log("  Waiting for NIM to become healthy...");
-      if (!nim.waitForNimHealth(nimPort)) {
+      if (!_nim.waitForNimHealth(nimPort)) {
         console.error("  NIM failed to start. Falling back to cloud API.");
         nimContainer = null;
       }
     }
   }
 
-  registry.updateSandbox(sandboxName, { model, provider, nimContainer, nimPort });
+  _registry.updateSandbox(sandboxName, { model, provider, nimContainer, nimPort });
 }
 
 // ── Step 5: Inference routing ────────────────────────────────────
@@ -1023,28 +1028,41 @@ function setInferenceRoute(providerName, model, opts = {}) {
   return false;
 }
 
-async function setupInference(sandboxName, model, provider) {
-  step(5, 7, "Setting up inference provider");
+async function setupInference(sandboxName, model, provider, deps) {
+  const _step = (deps && deps.step) || step;
+  const _getCredential = (deps && deps.getCredential) || getCredential;
+  const _run = (deps && deps.run) || run;
+  const _runCapture = (deps && deps.runCapture) || runCapture;
+  const _setInferenceRoute = (deps && deps.setInferenceRoute) || setInferenceRoute;
+  const _validateLocalProvider = (deps && deps.validateLocalProvider) || validateLocalProvider;
+  const _getLocalProviderBaseUrl = (deps && deps.getLocalProviderBaseUrl) || getLocalProviderBaseUrl;
+  const _getOllamaWarmupCommand = (deps && deps.getOllamaWarmupCommand) || getOllamaWarmupCommand;
+  const _validateOllamaModel = (deps && deps.validateOllamaModel) || validateOllamaModel;
+  const _registry = (deps && deps.registry) || registry;
+  const _exit = (deps && deps.exit) || process.exit;
+
+  _step(5, 7, "Setting up inference provider");
 
   if (provider === "nvidia-nim") {
     // Create nvidia-nim provider — pass credential via env to avoid
     // exposing the API key in process arguments (visible in ps/proc).
-    const apiKey = getCredential("NVIDIA_API_KEY");
-    run(
+    const apiKey = _getCredential("NVIDIA_API_KEY");
+    _run(
       `openshell provider create --name nvidia-nim --type openai ` +
       `--credential "NVIDIA_API_KEY=$_NEMOCLAW_CRED" ` +
       `--config "OPENAI_BASE_URL=https://integrate.api.nvidia.com/v1" 2>&1 || true`,
       { ignoreError: true, env: { _NEMOCLAW_CRED: apiKey || "" } }
     );
-    setInferenceRoute("nvidia-nim", model);
+    _setInferenceRoute("nvidia-nim", model);
   } else if (provider === "vllm-local") {
-    const validation = validateLocalProvider(provider, runCapture);
+    const validation = _validateLocalProvider(provider, _runCapture);
     if (!validation.ok) {
       console.error(`  ${validation.message}`);
-      process.exit(1);
+      _exit(1);
+      return;
     }
-    const baseUrl = getLocalProviderBaseUrl(provider);
-    run(
+    const baseUrl = _getLocalProviderBaseUrl(provider);
+    _run(
       `openshell provider create --name vllm-local --type openai ` +
       `--credential "OPENAI_API_KEY=dummy" ` +
       `--config "OPENAI_BASE_URL=${baseUrl}" 2>&1 || ` +
@@ -1052,16 +1070,17 @@ async function setupInference(sandboxName, model, provider) {
       `--config "OPENAI_BASE_URL=${baseUrl}" 2>&1 || true`,
       { ignoreError: true }
     );
-    setInferenceRoute("vllm-local", model);
+    _setInferenceRoute("vllm-local", model);
   } else if (provider === "ollama-local") {
-    const validation = validateLocalProvider(provider, runCapture);
+    const validation = _validateLocalProvider(provider, _runCapture);
     if (!validation.ok) {
       console.error(`  ${validation.message}`);
       console.error("  On macOS, local inference also depends on OpenShell host routing support.");
-      process.exit(1);
+      _exit(1);
+      return;
     }
-    const baseUrl = getLocalProviderBaseUrl(provider);
-    run(
+    const baseUrl = _getLocalProviderBaseUrl(provider);
+    _run(
       `openshell provider create --name ollama-local --type openai ` +
       `--credential "OPENAI_API_KEY=ollama" ` +
       `--config "OPENAI_BASE_URL=${baseUrl}" 2>&1 || ` +
@@ -1069,39 +1088,48 @@ async function setupInference(sandboxName, model, provider) {
       `--config "OPENAI_BASE_URL=${baseUrl}" 2>&1 || true`,
       { ignoreError: true }
     );
-    setInferenceRoute("ollama-local", model);
+    _setInferenceRoute("ollama-local", model);
     console.log(`  Priming Ollama model: ${model}`);
-    run(getOllamaWarmupCommand(model), { ignoreError: true });
-    const probe = validateOllamaModel(model, runCapture);
+    _run(_getOllamaWarmupCommand(model), { ignoreError: true });
+    const probe = _validateOllamaModel(model, _runCapture);
     if (!probe.ok) {
       console.error(`  ${probe.message}`);
-      process.exit(1);
+      _exit(1);
+      return;
     }
   }
 
-  registry.updateSandbox(sandboxName, { model, provider });
+  _registry.updateSandbox(sandboxName, { model, provider });
   console.log(`  ✓ Inference route set: ${provider} / ${model}`);
 }
 
 // ── Step 6: OpenClaw ─────────────────────────────────────────────
 
-async function setupOpenclaw(sandboxName, model, provider) {
-  step(6, 7, "Setting up OpenClaw inside sandbox");
+async function setupOpenclaw(sandboxName, model, provider, deps) {
+  const _step = (deps && deps.step) || step;
+  const _run = (deps && deps.run) || run;
+  const _fs = (deps && deps.fs) || fs;
+  const _getProviderSelectionConfig = (deps && deps.getProviderSelectionConfig) || getProviderSelectionConfig;
+  const _buildSandboxConfigSyncScript = (deps && deps.buildSandboxConfigSyncScript) || buildSandboxConfigSyncScript;
+  const _writeSandboxConfigSyncFile = (deps && deps.writeSandboxConfigSyncFile) || writeSandboxConfigSyncFile;
+  const _now = (deps && deps.now) || (() => new Date().toISOString());
 
-  const selectionConfig = getProviderSelectionConfig(provider, model);
+  _step(6, 7, "Setting up OpenClaw inside sandbox");
+
+  const selectionConfig = _getProviderSelectionConfig(provider, model);
   if (selectionConfig) {
     const sandboxConfig = {
       ...selectionConfig,
-      onboardedAt: new Date().toISOString(),
+      onboardedAt: _now(),
     };
-    const script = buildSandboxConfigSyncScript(sandboxConfig);
-    const scriptFile = writeSandboxConfigSyncFile(script);
+    const script = _buildSandboxConfigSyncScript(sandboxConfig);
+    const scriptFile = _writeSandboxConfigSyncFile(script);
     try {
-      run(`openshell sandbox connect "${sandboxName}" < ${shellQuote(scriptFile)}`, {
+      _run(`openshell sandbox connect "${sandboxName}" < ${shellQuote(scriptFile)}`, {
         stdio: ["ignore", "ignore", "inherit"],
       });
     } finally {
-      fs.unlinkSync(scriptFile);
+      _fs.unlinkSync(scriptFile);
     }
   }
 
@@ -1110,13 +1138,25 @@ async function setupOpenclaw(sandboxName, model, provider) {
 
 // ── Step 7: Policy presets ───────────────────────────────────────
 
-async function setupPolicies(sandboxName) {
-  step(7, 7, "Policy presets");
+async function setupPolicies(sandboxName, deps) {
+  const _step = (deps && deps.step) || step;
+  const _registry = (deps && deps.registry) || registry;
+  const _policies = (deps && deps.policies) || policies;
+  const _getCredential = (deps && deps.getCredential) || getCredential;
+  const _isNonInteractive = (deps && deps.isNonInteractive) || isNonInteractive;
+  const _prompt = (deps && deps.prompt) || prompt;
+  const _note = (deps && deps.note) || note;
+  const _waitForSandboxReady = (deps && deps.waitForSandboxReady) || waitForSandboxReady;
+  const _sleep = (deps && deps.sleep) || sleep;
+  const _exit = (deps && deps.exit) || process.exit;
+  const _env = (deps && deps.env) || process.env;
+
+  _step(7, 7, "Policy presets");
 
   const suggestions = ["pypi", "npm"];
 
   // Auto-detect local inference — sandbox needs host gateway egress
-  const sandbox = registry.getSandbox(sandboxName);
+  const sandbox = _registry.getSandbox(sandboxName);
   const sandboxProvider = sandbox ? sandbox.provider : null;
   if (sandboxProvider === "ollama-local" || sandboxProvider === "vllm-local") {
     suggestions.push("local-inference");
@@ -1124,71 +1164,75 @@ async function setupPolicies(sandboxName) {
   }
 
   // Auto-detect based on env tokens
-  if (getCredential("TELEGRAM_BOT_TOKEN")) {
+  if (_getCredential("TELEGRAM_BOT_TOKEN")) {
     suggestions.push("telegram");
     console.log("  Auto-detected: TELEGRAM_BOT_TOKEN → suggesting telegram preset");
   }
-  if (getCredential("SLACK_BOT_TOKEN")) {
+  if (_getCredential("SLACK_BOT_TOKEN")) {
     suggestions.push("slack");
     console.log("  Auto-detected: SLACK_BOT_TOKEN → suggesting slack preset");
   }
-  if (getCredential("DISCORD_BOT_TOKEN")) {
+  if (_getCredential("DISCORD_BOT_TOKEN")) {
     suggestions.push("discord");
     console.log("  Auto-detected: DISCORD_BOT_TOKEN → suggesting discord preset");
   }
 
-  const allPresets = policies.listPresets();
-  const applied = policies.getAppliedPresets(sandboxName);
+  const allPresets = _policies.listPresets();
+  const applied = _policies.getAppliedPresets(sandboxName);
 
-  if (isNonInteractive()) {
-    const policyMode = (process.env.NEMOCLAW_POLICY_MODE || "suggested").trim().toLowerCase();
+  if (_isNonInteractive()) {
+    const policyMode = (_env.NEMOCLAW_POLICY_MODE || "suggested").trim().toLowerCase();
     let selectedPresets = suggestions;
 
     if (policyMode === "skip" || policyMode === "none" || policyMode === "no") {
-      note("  [non-interactive] Skipping policy presets.");
+      _note("  [non-interactive] Skipping policy presets.");
       return;
     }
 
     if (policyMode === "custom" || policyMode === "list") {
-      selectedPresets = parsePolicyPresetEnv(process.env.NEMOCLAW_POLICY_PRESETS);
+      selectedPresets = parsePolicyPresetEnv(_env.NEMOCLAW_POLICY_PRESETS);
       if (selectedPresets.length === 0) {
         console.error("  NEMOCLAW_POLICY_PRESETS is required when NEMOCLAW_POLICY_MODE=custom.");
-        process.exit(1);
+        _exit(1);
+        return;
       }
     } else if (policyMode === "suggested" || policyMode === "default" || policyMode === "auto") {
-      const envPresets = parsePolicyPresetEnv(process.env.NEMOCLAW_POLICY_PRESETS);
+      const envPresets = parsePolicyPresetEnv(_env.NEMOCLAW_POLICY_PRESETS);
       if (envPresets.length > 0) {
         selectedPresets = envPresets;
       }
     } else {
       console.error(`  Unsupported NEMOCLAW_POLICY_MODE: ${policyMode}`);
       console.error("  Valid values: suggested, custom, skip");
-      process.exit(1);
+      _exit(1);
+      return;
     }
 
     const knownPresets = new Set(allPresets.map((p) => p.name));
     const invalidPresets = selectedPresets.filter((name) => !knownPresets.has(name));
     if (invalidPresets.length > 0) {
       console.error(`  Unknown policy preset(s): ${invalidPresets.join(", ")}`);
-      process.exit(1);
+      _exit(1);
+      return;
     }
 
-    if (!waitForSandboxReady(sandboxName)) {
+    if (!_waitForSandboxReady(sandboxName)) {
       console.error(`  Sandbox '${sandboxName}' was not ready for policy application.`);
-      process.exit(1);
+      _exit(1);
+      return;
     }
-    note(`  [non-interactive] Applying policy presets: ${selectedPresets.join(", ")}`);
+    _note(`  [non-interactive] Applying policy presets: ${selectedPresets.join(", ")}`);
     for (const name of selectedPresets) {
       for (let attempt = 0; attempt < 3; attempt += 1) {
         try {
-          policies.applyPreset(sandboxName, name);
+          _policies.applyPreset(sandboxName, name);
           break;
         } catch (err) {
           const message = err && err.message ? err.message : String(err);
           if (!message.includes("sandbox not found") || attempt === 2) {
             throw err;
           }
-          sleep(2);
+          _sleep(2);
         }
       }
     }
@@ -1202,7 +1246,7 @@ async function setupPolicies(sandboxName) {
     });
     console.log("");
 
-    const answer = await prompt(`  Apply suggested presets (${suggestions.join(", ")})? [Y/n/list]: `);
+    const answer = await _prompt(`  Apply suggested presets (${suggestions.join(", ")})? [Y/n/list]: `);
 
     if (answer.toLowerCase() === "n") {
       console.log("  Skipping policy presets.");
@@ -1211,15 +1255,15 @@ async function setupPolicies(sandboxName) {
 
     if (answer.toLowerCase() === "list") {
       // Let user pick
-      const picks = await prompt("  Enter preset names (comma-separated): ");
+      const picks = await _prompt("  Enter preset names (comma-separated): ");
       const selected = picks.split(",").map((s) => s.trim()).filter(Boolean);
       for (const name of selected) {
-        policies.applyPreset(sandboxName, name);
+        _policies.applyPreset(sandboxName, name);
       }
     } else {
       // Apply suggested
       for (const name of suggestions) {
-        policies.applyPreset(sandboxName, name);
+        _policies.applyPreset(sandboxName, name);
       }
     }
   }
@@ -1304,7 +1348,11 @@ module.exports = {
   promptOrDefault,
   setInferenceRoute,
   selectInferenceProvider,
+  setupInference,
+  setupInferenceBackend,
   setupNim,
+  setupOpenclaw,
+  setupPolicies,
   sleep,
   step,
   waitForSandboxReady,
