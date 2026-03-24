@@ -103,6 +103,56 @@ function buildPolicyGetCommand(sandboxName) {
   return `openshell policy get --full ${shellQuote(sandboxName)} 2>/dev/null`;
 }
 
+/**
+ * Merge preset network_policies entries into an existing policy YAML string.
+ * Pure function — no I/O side effects.
+ *
+ * Three merge paths:
+ *  1. currentPolicy has a network_policies: section → inject entries into it
+ *  2. currentPolicy exists but has no network_policies: → append a new section
+ *  3. No currentPolicy → create a minimal document with the entries
+ */
+function mergePresetIntoPolicy(currentPolicy, presetEntries) {
+  if (currentPolicy && currentPolicy.includes("network_policies:")) {
+    const lines = currentPolicy.split("\n");
+    const result = [];
+    let inNetworkPolicies = false;
+    let inserted = false;
+
+    for (const line of lines) {
+      const isTopLevel = /^\S.*:/.test(line);
+
+      if (line.trim() === "network_policies:" || line.trim().startsWith("network_policies:")) {
+        inNetworkPolicies = true;
+        result.push(line);
+        continue;
+      }
+
+      if (inNetworkPolicies && isTopLevel && !inserted) {
+        result.push(presetEntries);
+        inserted = true;
+        inNetworkPolicies = false;
+      }
+
+      result.push(line);
+    }
+
+    if (inNetworkPolicies && !inserted) {
+      result.push(presetEntries);
+    }
+
+    return result.join("\n");
+  } else if (currentPolicy) {
+    let policy = currentPolicy;
+    if (!policy.includes("version:")) {
+      policy = "version: 1\n" + policy;
+    }
+    return policy + "\n\nnetwork_policies:\n" + presetEntries;
+  } else {
+    return "version: 1\n\nnetwork_policies:\n" + presetEntries;
+  }
+}
+
 function applyPreset(sandboxName, presetName) {
   // Guard against truncated sandbox names — WSL can truncate hyphenated
   // names during argument parsing, e.g. "my-assistant" → "m"
@@ -139,53 +189,7 @@ function applyPreset(sandboxName, presetName) {
 
   let currentPolicy = parseCurrentPolicy(rawPolicy);
 
-  // Merge: inject preset entries under the existing network_policies key
-  let merged;
-  if (currentPolicy && currentPolicy.includes("network_policies:")) {
-    // Find the network_policies: line and append the new entries after it
-    // We need to insert before the next top-level key or end of file
-    const lines = currentPolicy.split("\n");
-    const result = [];
-    let inNetworkPolicies = false;
-    let inserted = false;
-
-    for (const line of lines) {
-      // Detect top-level keys (no leading whitespace, ends with colon)
-      const isTopLevel = /^\S.*:/.test(line);
-
-      if (line.trim() === "network_policies:" || line.trim().startsWith("network_policies:")) {
-        inNetworkPolicies = true;
-        result.push(line);
-        continue;
-      }
-
-      if (inNetworkPolicies && isTopLevel && !inserted) {
-        // We hit the next top-level key — insert preset entries before it
-        result.push(presetEntries);
-        inserted = true;
-        inNetworkPolicies = false;
-      }
-
-      result.push(line);
-    }
-
-    // If network_policies was the last section, append at end
-    if (inNetworkPolicies && !inserted) {
-      result.push(presetEntries);
-    }
-
-    merged = result.join("\n");
-  } else if (currentPolicy) {
-    // No network_policies section yet — append one
-    // Ensure version field exists
-    if (!currentPolicy.includes("version:")) {
-      currentPolicy = "version: 1\n" + currentPolicy;
-    }
-    merged = currentPolicy + "\n\nnetwork_policies:\n" + presetEntries;
-  } else {
-    // No current policy at all
-    merged = "version: 1\n\nnetwork_policies:\n" + presetEntries;
-  }
+  const merged = mergePresetIntoPolicy(currentPolicy, presetEntries);
 
   // Write temp file and apply
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-policy-"));
@@ -229,6 +233,7 @@ module.exports = {
   parseCurrentPolicy,
   buildPolicySetCommand,
   buildPolicyGetCommand,
+  mergePresetIntoPolicy,
   applyPreset,
   getAppliedPresets,
 };
