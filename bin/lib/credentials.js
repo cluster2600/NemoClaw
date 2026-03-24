@@ -76,10 +76,16 @@ function prompt(question) {
   });
 }
 
-async function ensureApiKey() {
-  let key = getCredential("NVIDIA_API_KEY");
+async function ensureApiKey(deps) {
+  const _getCredential = (deps && deps.getCredential) || getCredential;
+  const _saveCredential = (deps && deps.saveCredential) || saveCredential;
+  const _prompt = (deps && deps.prompt) || prompt;
+  const _env = (deps && deps.env) || process.env;
+  const _exit = (deps && deps.exit) || (() => process.exit(1));
+
+  let key = _getCredential("NVIDIA_API_KEY");
   if (key) {
-    process.env.NVIDIA_API_KEY = key;
+    _env.NVIDIA_API_KEY = key;
     return;
   }
 
@@ -94,15 +100,16 @@ async function ensureApiKey() {
   console.log("  └─────────────────────────────────────────────────────────────────┘");
   console.log("");
 
-  key = await prompt("  NVIDIA API Key: ");
+  key = await _prompt("  NVIDIA API Key: ");
 
   if (!key || !key.startsWith("nvapi-")) {
     console.error("  Invalid key. Must start with nvapi-");
-    process.exit(1);
+    _exit();
+    return;
   }
 
-  saveCredential("NVIDIA_API_KEY", key);
-  process.env.NVIDIA_API_KEY = key;
+  _saveCredential("NVIDIA_API_KEY", key);
+  _env.NVIDIA_API_KEY = key;
   console.log("");
   console.log("  Key saved to ~/.nemoclaw/credentials.json (mode 600)");
   console.log("");
@@ -117,17 +124,24 @@ function isRepoPrivate(repo) {
   }
 }
 
-async function ensureGithubToken() {
-  let token = getCredential("GITHUB_TOKEN");
+async function ensureGithubToken(deps) {
+  const _getCredential = (deps && deps.getCredential) || getCredential;
+  const _saveCredential = (deps && deps.saveCredential) || saveCredential;
+  const _prompt = (deps && deps.prompt) || prompt;
+  const _execSync = (deps && deps.execSync) || execSync;
+  const _env = (deps && deps.env) || process.env;
+  const _exit = (deps && deps.exit) || (() => process.exit(1));
+
+  let token = _getCredential("GITHUB_TOKEN");
   if (token) {
-    process.env.GITHUB_TOKEN = token;
+    _env.GITHUB_TOKEN = token;
     return;
   }
 
   try {
-    token = execSync("gh auth token 2>/dev/null", { encoding: "utf-8" }).trim();
+    token = _execSync("gh auth token 2>/dev/null", { encoding: "utf-8" }).trim();
     if (token) {
-      process.env.GITHUB_TOKEN = token;
+      _env.GITHUB_TOKEN = token;
       return;
     }
   } catch {}
@@ -141,15 +155,16 @@ async function ensureGithubToken() {
   console.log("  └──────────────────────────────────────────────────┘");
   console.log("");
 
-  token = await prompt("  GitHub Token: ");
+  token = await _prompt("  GitHub Token: ");
 
   if (!token) {
     console.error("  Token required for deploy (repo is private).");
-    process.exit(1);
+    _exit();
+    return;
   }
 
-  saveCredential("GITHUB_TOKEN", token);
-  process.env.GITHUB_TOKEN = token;
+  _saveCredential("GITHUB_TOKEN", token);
+  _env.GITHUB_TOKEN = token;
   console.log("");
   console.log("  Token saved to ~/.nemoclaw/credentials.json (mode 600)");
   console.log("");

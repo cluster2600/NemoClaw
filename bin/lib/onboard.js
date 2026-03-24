@@ -230,33 +230,40 @@ async function promptOllamaModel() {
   return options[index] || options[defaultIndex] || defaultModel;
 }
 
-function isDockerRunning() {
+function isDockerRunning(deps) {
+  const _runCapture = (deps && deps.runCapture) || runCapture;
   try {
-    runCapture("docker info", { ignoreError: false });
+    _runCapture("docker info", { ignoreError: false });
     return true;
   } catch {
     return false;
   }
 }
 
-function getContainerRuntime() {
-  const info = runCapture("docker info 2>/dev/null", { ignoreError: true });
+function getContainerRuntime(deps) {
+  const _runCapture = (deps && deps.runCapture) || runCapture;
+  const info = _runCapture("docker info 2>/dev/null", { ignoreError: true });
   return inferContainerRuntime(info);
 }
 
-function isOpenshellInstalled() {
+function isOpenshellInstalled(deps) {
+  const _runCapture = (deps && deps.runCapture) || runCapture;
   try {
-    runCapture("command -v openshell");
+    _runCapture("command -v openshell");
     return true;
   } catch {
     return false;
   }
 }
 
-function installOpenshell() {
-  const result = spawnSync("bash", [path.join(SCRIPTS, "install-openshell.sh")], {
+function installOpenshell(deps) {
+  const _spawnSync = (deps && deps.spawnSync) || spawnSync;
+  const _fs = (deps && deps.fs) || fs;
+  const _env = (deps && deps.env) || process.env;
+  const _isInstalled = (deps && deps.isOpenshellInstalled) || isOpenshellInstalled;
+  const result = _spawnSync("bash", [path.join(SCRIPTS, "install-openshell.sh")], {
     cwd: ROOT,
-    env: process.env,
+    env: _env,
     stdio: ["ignore", "pipe", "pipe"],
     encoding: "utf-8",
   });
@@ -267,22 +274,25 @@ function installOpenshell() {
     }
     return false;
   }
-  const localBin = process.env.XDG_BIN_HOME || path.join(process.env.HOME || "", ".local", "bin");
-  if (fs.existsSync(path.join(localBin, "openshell")) && !process.env.PATH.split(path.delimiter).includes(localBin)) {
-    process.env.PATH = `${localBin}${path.delimiter}${process.env.PATH}`;
+  const localBin = _env.XDG_BIN_HOME || path.join(_env.HOME || "", ".local", "bin");
+  if (_fs.existsSync(path.join(localBin, "openshell")) && !_env.PATH.split(path.delimiter).includes(localBin)) {
+    _env.PATH = `${localBin}${path.delimiter}${_env.PATH}`;
   }
-  return isOpenshellInstalled();
+  return _isInstalled(deps);
 }
 
-function sleep(seconds) {
-  require("child_process").spawnSync("sleep", [String(seconds)]);
+function sleep(seconds, deps) {
+  const _spawnSync = (deps && deps.spawnSync) || require("child_process").spawnSync;
+  _spawnSync("sleep", [String(seconds)]);
 }
 
-function waitForSandboxReady(sandboxName, attempts = 10, delaySeconds = 2) {
+function waitForSandboxReady(sandboxName, attempts = 10, delaySeconds = 2, deps) {
+  const _runCapture = (deps && deps.runCapture) || runCapture;
+  const _sleep = (deps && deps.sleep) || sleep;
   for (let i = 0; i < attempts; i += 1) {
-    const exists = runCapture(`openshell sandbox get "${sandboxName}" 2>/dev/null`, { ignoreError: true });
+    const exists = _runCapture(`openshell sandbox get "${sandboxName}" 2>/dev/null`, { ignoreError: true });
     if (exists) return true;
-    sleep(delaySeconds);
+    _sleep(delaySeconds, deps);
   }
   return false;
 }
@@ -1271,23 +1281,32 @@ async function onboard(opts = {}) {
 
 module.exports = {
   buildSandboxConfigSyncScript,
+  getContainerRuntime,
   getInstalledOpenshellVersion,
   getNonInteractiveModel,
   getNonInteractiveProvider,
   getStableGatewayImageRef,
   hasStaleGateway,
+  installOpenshell,
+  isDockerRunning,
+  isOpenshellInstalled,
   isSafeModelId,
   isSafeOriginsList,
   isSafeVersion,
   isSandboxReady,
+  note,
   onboard,
   parsePolicyPresetEnv,
   patchDockerfileExtraOrigins,
   patchDockerfileModel,
   patchDockerfileVersion,
   printDashboard,
+  promptOrDefault,
   setInferenceRoute,
   selectInferenceProvider,
   setupNim,
+  sleep,
+  step,
+  waitForSandboxReady,
   writeSandboxConfigSyncFile,
 };

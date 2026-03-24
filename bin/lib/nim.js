@@ -117,45 +117,53 @@ function detectGpu(deps) {
   return null;
 }
 
-function pullNimImage(model) {
+function pullNimImage(model, deps) {
+  const _run = (deps && deps.run) || run;
+  const _exit = (deps && deps.exit) || (() => process.exit(1));
   const image = getImageForModel(model);
   if (!image) {
     console.error(`  Unknown model: ${model}`);
-    process.exit(1);
+    _exit();
+    return null;
   }
   console.log(`  Pulling NIM image: ${image}`);
-  run(`docker pull ${shellQuote(image)}`);
+  _run(`docker pull ${shellQuote(image)}`);
   return image;
 }
 
-function startNimContainer(sandboxName, model, port = 8000) {
+function startNimContainer(sandboxName, model, port = 8000, deps) {
+  const _run = (deps && deps.run) || run;
+  const _exit = (deps && deps.exit) || (() => process.exit(1));
   const name = containerName(sandboxName);
   const image = getImageForModel(model);
   if (!image) {
     console.error(`  Unknown model: ${model}`);
-    process.exit(1);
+    _exit();
+    return null;
   }
 
   // Stop any existing container with same name
   const qn = shellQuote(name);
-  run(`docker rm -f ${qn} 2>/dev/null || true`, { ignoreError: true });
+  _run(`docker rm -f ${qn} 2>/dev/null || true`, { ignoreError: true });
 
   console.log(`  Starting NIM container: ${name}`);
-  run(
+  _run(
     `docker run -d --gpus all -p ${Number(port)}:8000 --name ${qn} --shm-size 16g ${shellQuote(image)}`
   );
   return name;
 }
 
-function waitForNimHealth(port = 8000, timeout = 300) {
-  const start = Date.now();
-  const interval = 5000;
+function waitForNimHealth(port = 8000, timeout = 300, deps) {
+  const _runCapture = (deps && deps.runCapture) || runCapture;
+  const _sleep = (deps && deps.sleep) || (() => require("child_process").spawnSync("sleep", ["5"]));
+  const _now = (deps && deps.now) || (() => Date.now());
+  const start = _now();
   const safePort = Number(port);
   console.log(`  Waiting for NIM health on port ${safePort} (timeout: ${timeout}s)...`);
 
-  while ((Date.now() - start) / 1000 < timeout) {
+  while ((_now() - start) / 1000 < timeout) {
     try {
-      const result = runCapture(`curl -sf http://localhost:${safePort}/v1/models`, {
+      const result = _runCapture(`curl -sf http://localhost:${safePort}/v1/models`, {
         ignoreError: true,
       });
       if (result) {
@@ -163,19 +171,19 @@ function waitForNimHealth(port = 8000, timeout = 300) {
         return true;
       }
     } catch {}
-    // Synchronous sleep via spawnSync
-    require("child_process").spawnSync("sleep", ["5"]);
+    _sleep();
   }
   console.error(`  NIM did not become healthy within ${timeout}s.`);
   return false;
 }
 
-function stopNimContainer(sandboxName) {
+function stopNimContainer(sandboxName, deps) {
+  const _run = (deps && deps.run) || run;
   const name = containerName(sandboxName);
   const qn = shellQuote(name);
   console.log(`  Stopping NIM container: ${name}`);
-  run(`docker stop ${qn} 2>/dev/null || true`, { ignoreError: true });
-  run(`docker rm ${qn} 2>/dev/null || true`, { ignoreError: true });
+  _run(`docker stop ${qn} 2>/dev/null || true`, { ignoreError: true });
+  _run(`docker rm ${qn} 2>/dev/null || true`, { ignoreError: true });
 }
 
 function nimStatus(sandboxName, port) {
