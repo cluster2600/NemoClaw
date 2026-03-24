@@ -153,7 +153,13 @@ function mergePresetIntoPolicy(currentPolicy, presetEntries) {
   }
 }
 
-function applyPreset(sandboxName, presetName) {
+function applyPreset(sandboxName, presetName, deps) {
+  const _run = (deps && deps.run) || run;
+  const _runCapture = (deps && deps.runCapture) || runCapture;
+  const _registry = (deps && deps.registry) || registry;
+  const _fs = (deps && deps.fs) || fs;
+  const _os = (deps && deps.os) || os;
+
   // Guard against truncated sandbox names — WSL can truncate hyphenated
   // names during argument parsing, e.g. "my-assistant" → "m"
   const isRfc1123Label = /^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(sandboxName);
@@ -181,7 +187,7 @@ function applyPreset(sandboxName, presetName) {
   // Get current policy YAML from sandbox
   let rawPolicy = "";
   try {
-    rawPolicy = runCapture(
+    rawPolicy = _runCapture(
       buildPolicyGetCommand(sandboxName),
       { ignoreError: true }
     );
@@ -192,27 +198,27 @@ function applyPreset(sandboxName, presetName) {
   const merged = mergePresetIntoPolicy(currentPolicy, presetEntries);
 
   // Write temp file and apply
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-policy-"));
+  const tmpDir = _fs.mkdtempSync(path.join(_os.tmpdir(), "nemoclaw-policy-"));
   const tmpFile = path.join(tmpDir, "policy.yaml");
-  fs.writeFileSync(tmpFile, merged, { encoding: "utf-8", mode: 0o600 });
+  _fs.writeFileSync(tmpFile, merged, { encoding: "utf-8", mode: 0o600 });
 
   try {
-    run(buildPolicySetCommand(tmpFile, sandboxName));
+    _run(buildPolicySetCommand(tmpFile, sandboxName));
 
     console.log(`  Applied preset: ${presetName}`);
   } finally {
-    try { fs.unlinkSync(tmpFile); } catch {}
-    try { fs.rmdirSync(tmpDir); } catch {}
+    try { _fs.unlinkSync(tmpFile); } catch {}
+    try { _fs.rmdirSync(tmpDir); } catch {}
   }
 
   // Update registry
-  const sandbox = registry.getSandbox(sandboxName);
+  const sandbox = _registry.getSandbox(sandboxName);
   if (sandbox) {
     const pols = sandbox.policies || [];
     if (!pols.includes(presetName)) {
       pols.push(presetName);
     }
-    registry.updateSandbox(sandboxName, { policies: pols });
+    _registry.updateSandbox(sandboxName, { policies: pols });
   }
 
   return true;

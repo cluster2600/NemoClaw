@@ -1388,7 +1388,17 @@ function printDashboard(sandboxName, model, provider) {
 
 // ── Main ─────────────────────────────────────────────────────────
 
-async function onboard(opts = {}) {
+async function onboard(opts = {}, deps) {
+  const _preflight = (deps && deps.preflight) || preflight;
+  const _startGateway = (deps && deps.startGateway) || startGateway;
+  const _selectInferenceProvider = (deps && deps.selectInferenceProvider) || selectInferenceProvider;
+  const _createSandbox = (deps && deps.createSandbox) || createSandbox;
+  const _setupInferenceBackend = (deps && deps.setupInferenceBackend) || setupInferenceBackend;
+  const _setupInference = (deps && deps.setupInference) || setupInference;
+  const _setupOpenclaw = (deps && deps.setupOpenclaw) || setupOpenclaw;
+  const _setupPolicies = (deps && deps.setupPolicies) || setupPolicies;
+  const _printDashboard = (deps && deps.printDashboard) || printDashboard;
+
   NON_INTERACTIVE = opts.nonInteractive || process.env.NEMOCLAW_NON_INTERACTIVE === "1";
 
   console.log("");
@@ -1396,18 +1406,18 @@ async function onboard(opts = {}) {
   if (isNonInteractive()) note("  (non-interactive mode)");
   console.log("  ===================");
 
-  const gpu = await preflight();
-  await startGateway(gpu);
+  const gpu = await _preflight();
+  await _startGateway(gpu);
   // Select model/provider BEFORE building the sandbox so that
   // openclaw.json inside the image contains the correct model.
   // Ref: https://github.com/NVIDIA/NemoClaw/issues/628
-  const { model, provider } = await selectInferenceProvider(gpu);
-  const sandboxName = await createSandbox(gpu, model);
-  await setupInferenceBackend(sandboxName, model, provider, gpu);
-  await setupInference(sandboxName, model, provider);
-  await setupOpenclaw(sandboxName, model, provider);
-  await setupPolicies(sandboxName);
-  printDashboard(sandboxName, model, provider);
+  const { model, provider } = await _selectInferenceProvider(gpu);
+  const sandboxName = await _createSandbox(gpu, model);
+  await _setupInferenceBackend(sandboxName, model, provider, gpu);
+  await _setupInference(sandboxName, model, provider);
+  await _setupOpenclaw(sandboxName, model, provider);
+  await _setupPolicies(sandboxName);
+  _printDashboard(sandboxName, model, provider);
 }
 
 module.exports = {
