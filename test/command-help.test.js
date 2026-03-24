@@ -101,6 +101,114 @@ describe("command-help module", () => {
   });
 });
 
+// ── Scope labels and disambiguation (#754) ──────────────────────
+
+describe("scope labels and disambiguation (#754)", () => {
+  const { GLOBAL_HELP, SANDBOX_HELP, showCommandHelp } =
+    require("../bin/lib/command-help");
+
+  it("global status --help shows [global] scope label", () => {
+    const r = runCli(["status", "--help"]);
+    assert.equal(r.code, 0);
+    assert.ok(r.stdout.includes("[global]"), "should show [global] scope label");
+  });
+
+  it("sandbox status --help shows [per-sandbox] scope label", () => {
+    const ctx = makeSandboxHome();
+    try {
+      const r = runCli(["test-sb", "status", "--help"], { HOME: ctx.home });
+      assert.equal(r.code, 0);
+      assert.ok(r.stdout.includes("[per-sandbox]"), "should show [per-sandbox] scope label");
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("global status --help shows note about per-sandbox alternative", () => {
+    const r = runCli(["status", "--help"]);
+    assert.equal(r.code, 0);
+    assert.ok(r.stdout.includes("Note:"), "should show Note section");
+    assert.ok(r.stdout.includes("nemoclaw <name> status"), "should reference per-sandbox status");
+  });
+
+  it("sandbox status --help shows note about global alternative", () => {
+    const ctx = makeSandboxHome();
+    try {
+      const r = runCli(["test-sb", "status", "--help"], { HOME: ctx.home });
+      assert.equal(r.code, 0);
+      assert.ok(r.stdout.includes("Note:"), "should show Note section");
+      assert.ok(r.stdout.includes("nemoclaw status"), "should reference global status");
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("global status See also annotates <name> status as per-sandbox", () => {
+    const r = runCli(["status", "--help"]);
+    assert.equal(r.code, 0);
+    assert.ok(r.stdout.includes("(per-sandbox)"), "should annotate sandbox ref");
+  });
+
+  it("sandbox status See also annotates status as global", () => {
+    const ctx = makeSandboxHome();
+    try {
+      const r = runCli(["test-sb", "status", "--help"], { HOME: ctx.home });
+      assert.equal(r.code, 0);
+      assert.ok(r.stdout.includes("status (global)"), "should annotate global status");
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("list --help See also annotates <name> status as per-sandbox", () => {
+    const r = runCli(["list", "--help"]);
+    assert.equal(r.code, 0);
+    assert.ok(r.stdout.includes("(per-sandbox)"), "should annotate sandbox ref in list See also");
+  });
+
+  it("main help groups commands as Global vs Sandbox sections", () => {
+    const r = runCli(["help"]);
+    assert.equal(r.code, 0);
+    assert.ok(r.stdout.includes("Global Commands:"), "should have Global Commands section");
+    assert.ok(r.stdout.includes("Sandbox Commands:"), "should have Sandbox Commands section");
+  });
+
+  it("main help Global Commands section contains list and status", () => {
+    const r = runCli(["help"]);
+    const lines = r.stdout.split("\n");
+    const globalIdx = lines.findIndex((l) => l.includes("Global Commands:"));
+    const sandboxIdx = lines.findIndex((l) => l.includes("Sandbox Commands:"));
+    assert.ok(globalIdx >= 0 && sandboxIdx > globalIdx, "Global before Sandbox");
+    const globalSection = lines.slice(globalIdx, sandboxIdx).join("\n");
+    assert.ok(globalSection.includes("nemoclaw list"), "list in Global section");
+    assert.ok(globalSection.includes("nemoclaw status"), "status in Global section");
+    assert.ok(globalSection.includes("nemoclaw start"), "start in Global section");
+    assert.ok(globalSection.includes("nemoclaw stop"), "stop in Global section");
+  });
+
+  it("main help Sandbox Commands section contains <name> commands", () => {
+    const r = runCli(["help"]);
+    const lines = r.stdout.split("\n");
+    const sandboxIdx = lines.findIndex((l) => l.includes("Sandbox Commands:"));
+    assert.ok(sandboxIdx >= 0, "should have Sandbox Commands section");
+    const sandboxSection = lines.slice(sandboxIdx).join("\n");
+    assert.ok(sandboxSection.includes("<name> connect"), "connect in Sandbox section");
+    assert.ok(sandboxSection.includes("<name> status"), "status in Sandbox section");
+    assert.ok(sandboxSection.includes("<name> model"), "model in Sandbox section");
+    assert.ok(sandboxSection.includes("<name> destroy"), "destroy in Sandbox section");
+  });
+
+  it("GLOBAL_HELP.status has note field for disambiguation", () => {
+    assert.ok(GLOBAL_HELP.status.note, "global status should have note");
+    assert.ok(GLOBAL_HELP.status.note.includes("<name>"), "note should reference per-sandbox");
+  });
+
+  it("SANDBOX_HELP.status has note field for disambiguation", () => {
+    assert.ok(SANDBOX_HELP.status.note, "sandbox status should have note");
+    assert.ok(SANDBOX_HELP.status.note.includes("nemoclaw status"), "note should reference global");
+  });
+});
+
 // ── CLI integration: global commands ─────────────────────────────
 
 describe("per-command --help for global commands", () => {

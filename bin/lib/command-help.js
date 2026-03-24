@@ -42,7 +42,7 @@ const GLOBAL_HELP = {
       "nemoclaw list --json",
       "nemoclaw list --json | jq '.sandboxes[].name'",
     ],
-    related: ["status", "onboard"],
+    related: ["status", "onboard", "<name> status"],
   },
 
   deploy: {
@@ -78,7 +78,7 @@ const GLOBAL_HELP = {
   },
 
   status: {
-    purpose: "Show global sandbox list and service status.",
+    purpose: "Show all sandboxes and auxiliary service status (global overview).",
     usage: "nemoclaw status [--json]",
     options: [
       ["--json", "Output machine-readable JSON (skips live service check)"],
@@ -88,6 +88,7 @@ const GLOBAL_HELP = {
       "nemoclaw status --json",
     ],
     related: ["list", "<name> status"],
+    note: "For per-sandbox health details, use: nemoclaw <name> status",
   },
 
   debug: {
@@ -162,7 +163,7 @@ const SANDBOX_HELP = {
   },
 
   status: {
-    purpose: "Show sandbox health, model, provider, and NIM status.",
+    purpose: "Show health, model, provider, and NIM status for a specific sandbox.",
     usage: "nemoclaw <name> status [--json]",
     options: [
       ["--json", "Output machine-readable JSON (skips openshell query)"],
@@ -171,7 +172,8 @@ const SANDBOX_HELP = {
       "nemoclaw my-sandbox status",
       "nemoclaw my-sandbox status --json",
     ],
-    related: ["connect", "logs"],
+    related: ["connect", "logs", "status"],
+    note: "For a global overview, use: nemoclaw status",
   },
 
   logs: {
@@ -247,8 +249,9 @@ function showCommandHelp(cmd, scope = "global") {
   if (!entry) return false;
 
   const lines = [];
+  const scopeLabel = scope === "sandbox" ? "[per-sandbox]" : "[global]";
   lines.push("");
-  lines.push(`  ${entry.purpose}`);
+  lines.push(`  ${entry.purpose}  ${scopeLabel}`);
   lines.push("");
   lines.push(`  Usage:`);
   lines.push(`    ${entry.usage}`);
@@ -270,8 +273,19 @@ function showCommandHelp(cmd, scope = "global") {
   }
 
   if (entry.related && entry.related.length > 0) {
+    const annotated = entry.related.map((r) => {
+      if (r.startsWith("<name> ")) return `${r} (per-sandbox)`;
+      // Annotate global commands that share names with sandbox actions
+      if (scope === "sandbox" && GLOBAL_HELP[r]) return `${r} (global)`;
+      return r;
+    });
     lines.push("");
-    lines.push(`  See also: ${entry.related.join(", ")}`);
+    lines.push(`  See also: ${annotated.join(", ")}`);
+  }
+
+  if (entry.note) {
+    lines.push("");
+    lines.push(`  Note: ${entry.note}`);
   }
 
   lines.push("");

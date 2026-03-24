@@ -27,11 +27,11 @@ describe("model command-help", () => {
 // ── help text includes model section ────────────────────────────
 
 describe("main help text", () => {
-  it("includes Model Management section", () => {
+  it("includes model commands in Sandbox Commands section", () => {
     // Read the help function output by loading the source
     const fs = require("fs");
     const src = fs.readFileSync(require.resolve("../bin/nemoclaw.js"), "utf-8");
-    assert.ok(src.includes("Model Management"));
+    assert.ok(src.includes("Sandbox Commands"));
     assert.ok(src.includes("model list"));
     assert.ok(src.includes("model set"));
   });

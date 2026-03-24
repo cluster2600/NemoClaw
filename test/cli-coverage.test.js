@@ -300,8 +300,8 @@ describe("help output completeness", () => {
     const r = runCli(["help"]);
     assert.equal(r.code, 0);
     const sections = [
-      "Getting Started", "Sandbox Management", "Policy Presets",
-      "Deploy", "Services", "Troubleshooting", "Updates", "Cleanup",
+      "Getting Started", "Global Commands", "Sandbox Commands",
+      "Troubleshooting", "Updates", "Cleanup",
       "Uninstall flags",
     ];
     for (const section of sections) {

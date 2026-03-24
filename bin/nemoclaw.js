@@ -655,29 +655,23 @@ function help() {
     ${B}nemoclaw onboard${R}                 Configure inference endpoint and credentials
     nemoclaw setup-spark             Set up on DGX Spark ${D}(fixes cgroup v2 + Docker)${R}
 
-  ${G}Sandbox Management:${R}
+  ${G}Global Commands:${R}           ${D}(apply to the whole NemoClaw installation)${R}
     ${B}nemoclaw list${R}                    List all sandboxes ${D}(--json for machine output)${R}
+    nemoclaw status                  Show sandbox list + service status ${D}(--json)${R}
+    nemoclaw start                   Start auxiliary services ${D}(Telegram, tunnel)${R}
+    nemoclaw stop                    Stop all services
+    nemoclaw deploy <instance>       Deploy to a Brev VM and start services
+
+  ${G}Sandbox Commands:${R}          ${D}(operate on a specific sandbox by name)${R}
     nemoclaw <name> connect          Shell into a running sandbox
     nemoclaw <name> status           Sandbox health + NIM status ${D}(--json)${R}
     nemoclaw <name> logs ${D}[--follow]${R}  Stream sandbox logs
-    nemoclaw <name> destroy          Stop NIM + delete sandbox ${D}(--yes to skip prompt)${R}
-
-  ${G}Model Management:${R}
     nemoclaw <name> model            Show current model and provider
     nemoclaw <name> model list       List available models ${D}(● = active)${R}
     nemoclaw <name> model set <id>   Switch to a different model
-
-  ${G}Policy Presets:${R}
     nemoclaw <name> policy-add       Add a network or filesystem policy preset
     nemoclaw <name> policy-list      List presets ${D}(● = applied)${R}
-
-  ${G}Deploy:${R}
-    nemoclaw deploy <instance>       Deploy to a Brev VM and start services
-
-  ${G}Services:${R}
-    nemoclaw start                   Start auxiliary services ${D}(Telegram, tunnel)${R}
-    nemoclaw stop                    Stop all services
-    nemoclaw status                  Show sandbox list and service status ${D}(--json)${R}
+    nemoclaw <name> destroy          Stop NIM + delete sandbox ${D}(--yes to skip prompt)${R}
 
   Troubleshooting:
     nemoclaw reconnect               Repair gateway/sandbox connectivity ${D}(#716)${R}

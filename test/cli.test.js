@@ -26,8 +26,8 @@ describe("CLI dispatch", () => {
     const r = run("help");
     assert.equal(r.code, 0);
     assert.ok(r.out.includes("Getting Started"), "missing Getting Started section");
-    assert.ok(r.out.includes("Sandbox Management"), "missing Sandbox Management section");
-    assert.ok(r.out.includes("Policy Presets"), "missing Policy Presets section");
+    assert.ok(r.out.includes("Global Commands"), "missing Global Commands section");
+    assert.ok(r.out.includes("Sandbox Commands"), "missing Sandbox Commands section");
   });
 
   it("--help exits 0", () => {
