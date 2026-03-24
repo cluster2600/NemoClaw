@@ -83,6 +83,8 @@ async function onboard(args) {
   if (unknownArgs.length > 0) {
     console.error(`  Unknown onboard option(s): ${unknownArgs.join(", ")}`);
     console.error("  Usage: nemoclaw onboard [--non-interactive]");
+    console.error("");
+    console.error("  Help:  nemoclaw onboard --help");
     process.exit(1);
   }
   const nonInteractive = args.includes("--non-interactive");
@@ -115,6 +117,8 @@ async function deploy(instanceName) {
     console.error("    nemoclaw deploy my-gpu-box");
     console.error("    nemoclaw deploy nemoclaw-prod");
     console.error("    nemoclaw deploy nemoclaw-test");
+    console.error("");
+    console.error("  Help:  nemoclaw deploy --help");
     process.exit(1);
   }
   await ensureApiKey();
@@ -133,7 +137,10 @@ async function deploy(instanceName) {
   try {
     execFileSync("which", ["brev"], { stdio: "ignore" });
   } catch {
-    console.error("brev CLI not found. Install: https://brev.nvidia.com");
+    console.error("  brev CLI not found.");
+    console.error("  Install it from: https://brev.nvidia.com");
+    console.error("");
+    console.error("  Then retry:  nemoclaw deploy " + name);
     process.exit(1);
   }
 
@@ -193,7 +200,7 @@ async function deploy(instanceName) {
   console.log("  Running setup...");
   runInteractive(`ssh -t -o StrictHostKeyChecking=no -o LogLevel=ERROR ${qname} 'cd /home/ubuntu/nemoclaw && set -a && . .env && set +a && bash scripts/brev-setup.sh'`);
 
-  if (tgToken) {
+  if (credEnv.TELEGRAM_BOT_TOKEN) {
     console.log("  Starting services...");
     run(`ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR ${qname} 'cd /home/ubuntu/nemoclaw && set -a && . .env && set +a && bash scripts/start-services.sh'`);
   }
@@ -420,6 +427,8 @@ function sandboxModel(sandboxName, actionArgs) {
     const { provider } = model.getCurrentModel(sandboxName);
     if (!provider) {
       console.error(`  Sandbox '${sandboxName}' has no provider configured.`);
+      console.error("");
+      console.error("  Re-run onboard to configure a provider:  nemoclaw onboard");
       process.exit(1);
     }
     const { models: available, source } = model.listAvailableModels(provider);
@@ -776,8 +785,12 @@ if (isVerbose()) {
       case "policy-list": sandboxPolicyList(cmd); break;
       case "destroy":     await sandboxDestroy(cmd, actionArgs); break;
       default:
-        console.error(`  Unknown action: ${action}`);
-        console.error(`  Valid actions: connect, status, logs, model, policy-add, policy-list, destroy`);
+        console.error(`  Unknown action '${action}' for sandbox '${cmd}'.`);
+        console.error("");
+        console.error("  Valid actions: connect, status, logs, model, policy-add, policy-list, destroy");
+        console.error("");
+        console.error(`  Try:  nemoclaw ${cmd} connect`);
+        console.error(`  Help: nemoclaw ${cmd} <action> --help`);
         process.exit(1);
     }
     return;

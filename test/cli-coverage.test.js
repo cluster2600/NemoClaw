@@ -548,3 +548,73 @@ describe("--json flag is stripped from args", () => {
     assert.ok(r.stdout.includes("--json"), "help should mention --json flag");
   });
 });
+
+// ── tgToken fix + remediation hints (#755) ────────────────────────
+
+describe("deploy error messages (#755)", () => {
+  it("deploy with no instance name shows usage and --help hint", () => {
+    const r = runCli(["deploy"]);
+    assert.equal(r.code, 1);
+    assert.ok(r.combined.includes("Usage: nemoclaw deploy"), "should show usage");
+    assert.ok(r.combined.includes("nemoclaw deploy --help"), "should suggest --help");
+    assert.ok(r.combined.includes("Examples:"), "should show examples");
+  });
+});
+
+describe("unknown sandbox action remediation hints (#755)", () => {
+  let ctx;
+
+  beforeEach(() => {
+    ctx = makeSandboxHome();
+  });
+
+  afterEach(() => {
+    ctx.cleanup();
+  });
+
+  it("unknown action includes sandbox name context", () => {
+    const r = runCli([ctx.sandboxName, "bogus-action"], { HOME: ctx.home });
+    assert.equal(r.code, 1);
+    assert.ok(r.combined.includes(ctx.sandboxName), "should mention sandbox name in error");
+  });
+
+  it("unknown action suggests connect and --help", () => {
+    const r = runCli([ctx.sandboxName, "bogus-action"], { HOME: ctx.home });
+    assert.equal(r.code, 1);
+    assert.ok(r.combined.includes(`nemoclaw ${ctx.sandboxName} connect`), "should suggest connect");
+    assert.ok(r.combined.includes("--help"), "should suggest --help");
+  });
+
+  it("model list with no provider suggests onboard", () => {
+    ctx.cleanup();
+    ctx = makeSandboxHome({ provider: null });
+    const r = runCli([ctx.sandboxName, "model", "list"], { HOME: ctx.home });
+    assert.equal(r.code, 1);
+    assert.ok(r.combined.includes("no provider configured"), "should mention missing provider");
+    assert.ok(r.combined.includes("nemoclaw onboard"), "should suggest running onboard");
+  });
+});
+
+describe("onboard unknown option remediation hint (#755)", () => {
+  it("unknown onboard option suggests --help", () => {
+    const r = runCli(["onboard", "--non-interactiv"]);
+    assert.equal(r.code, 1);
+    assert.ok(r.combined.includes("Unknown onboard option"), "should report unknown option");
+    assert.ok(r.combined.includes("nemoclaw onboard --help"), "should suggest --help");
+  });
+});
+
+describe("deploy tgToken fix (credEnv.TELEGRAM_BOT_TOKEN)", () => {
+  it("deploy references credEnv.TELEGRAM_BOT_TOKEN not undefined tgToken", () => {
+    // Verify the source code no longer contains the undefined tgToken reference
+    const source = fs.readFileSync(
+      path.join(__dirname, "..", "bin", "nemoclaw.js"),
+      "utf-8",
+    );
+    assert.ok(!source.includes("if (tgToken)"), "should not reference undefined tgToken");
+    assert.ok(
+      source.includes("credEnv.TELEGRAM_BOT_TOKEN"),
+      "should check credEnv.TELEGRAM_BOT_TOKEN",
+    );
+  });
+});
