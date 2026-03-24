@@ -140,6 +140,12 @@ if extra_origins_raw: \
     for o in extra_origins_raw.split(','): \
         o = o.strip(); \
         if o and o not in origins: origins.append(o); \
+reasoning_models = {'nvidia/nemotron-3-super-120b-a12b', 'nvidia/llama-3.1-nemotron-ultra-253b-v1', 'nvidia/llama-3.3-nemotron-super-49b-v1.5'}; \
+model_max_tokens = {'nvidia/nemotron-3-super-120b-a12b': 8192, 'nvidia/llama-3.1-nemotron-ultra-253b-v1': 8192}; \
+is_reasoning = model in reasoning_models; \
+max_tokens = model_max_tokens.get(model, 4096); \
+def model_entry(mid, mname): \
+    return {'id': mid, 'name': mname, 'reasoning': is_reasoning, 'input': ['text'], 'cost': {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0}, 'contextWindow': 131072, 'maxTokens': max_tokens}; \
 config = { \
     'agents': {'defaults': {'model': {'primary': f'inference/{model}'}}}, \
     'models': {'mode': 'merge', 'providers': { \
@@ -147,13 +153,13 @@ config = { \
             'baseUrl': 'https://inference.local/v1', \
             'apiKey': 'openshell-managed', \
             'api': 'openai-completions', \
-            'models': [{'id': model.split('/')[-1], 'name': model, 'reasoning': False, 'input': ['text'], 'cost': {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0}, 'contextWindow': 131072, 'maxTokens': 4096}] \
+            'models': [model_entry(model.split('/')[-1], model)] \
         }, \
         'inference': { \
             'baseUrl': 'https://inference.local/v1', \
             'apiKey': 'unused', \
             'api': 'openai-completions', \
-            'models': [{'id': model, 'name': model, 'reasoning': False, 'input': ['text'], 'cost': {'input': 0, 'output': 0, 'cacheRead': 0, 'cacheWrite': 0}, 'contextWindow': 131072, 'maxTokens': 4096}] \
+            'models': [model_entry(model, model)] \
         } \
     }}, \
     'channels': {'defaults': {'configWrites': False}}, \

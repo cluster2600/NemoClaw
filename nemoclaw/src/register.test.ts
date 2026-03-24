@@ -115,6 +115,44 @@ describe("plugin registration", () => {
     expect(chat[0]?.id).toBe("nvidia/nemotron-3-super-120b-a12b");
     expect(chat.length).toBeGreaterThanOrEqual(6);
   });
+
+  it("marks Nemotron Super/Ultra models as reasoning-capable (#736)", () => {
+    mockedLoadOnboardConfig.mockReturnValue(null);
+    const api = createMockApi();
+    register(api);
+    const providerArg = vi.mocked(api.registerProvider).mock.calls[0][0];
+    const chat = providerArg.models?.chat ?? [];
+    const nemotronSuper = chat.find((m) => m.id.includes("nemotron-3-super-120b"));
+    const nemotronUltra = chat.find((m) => m.id.includes("nemotron-ultra-253b"));
+    const nemotronSuper49 = chat.find((m) => m.id.includes("nemotron-super-49b"));
+    expect(nemotronSuper?.reasoning).toBe(true);
+    expect(nemotronUltra?.reasoning).toBe(true);
+    expect(nemotronSuper49?.reasoning).toBe(true);
+  });
+
+  it("non-reasoning models have reasoning=false (#736)", () => {
+    mockedLoadOnboardConfig.mockReturnValue(null);
+    const api = createMockApi();
+    register(api);
+    const providerArg = vi.mocked(api.registerProvider).mock.calls[0][0];
+    const chat = providerArg.models?.chat ?? [];
+    const kimi = chat.find((m) => m.id.includes("kimi-k2.5"));
+    const qwen = chat.find((m) => m.id.includes("qwen3.5"));
+    const nano = chat.find((m) => m.id.includes("nemotron-3-nano"));
+    expect(kimi?.reasoning).toBe(false);
+    expect(qwen?.reasoning).toBe(false);
+    expect(nano?.reasoning).toBe(false);
+  });
+
+  it("Nemotron Super 120B has maxOutput 8192 (#736)", () => {
+    mockedLoadOnboardConfig.mockReturnValue(null);
+    const api = createMockApi();
+    register(api);
+    const providerArg = vi.mocked(api.registerProvider).mock.calls[0][0];
+    const chat = providerArg.models?.chat ?? [];
+    const nemotronSuper = chat.find((m) => m.id.includes("nemotron-3-super-120b"));
+    expect(nemotronSuper?.maxOutput).toBe(8192);
+  });
 });
 
 describe("getPluginConfig", () => {

@@ -78,6 +78,7 @@ export interface ModelProviderEntry {
   label: string;
   contextWindow?: number;
   maxOutput?: number;
+  reasoning?: boolean;
 }
 
 /** Model catalog shape. */
@@ -140,36 +141,42 @@ const MODEL_CATALOG: ModelProviderEntry[] = [
     label: "Nemotron 3 Super 120B (March 2026)",
     contextWindow: 131072,
     maxOutput: 8192,
+    reasoning: true,
   },
   {
     id: "nvidia/llama-3.1-nemotron-ultra-253b-v1",
     label: "Nemotron Ultra 253B",
     contextWindow: 131072,
-    maxOutput: 4096,
+    maxOutput: 8192,
+    reasoning: true,
   },
   {
     id: "nvidia/llama-3.3-nemotron-super-49b-v1.5",
     label: "Nemotron Super 49B v1.5",
     contextWindow: 131072,
     maxOutput: 4096,
+    reasoning: true,
   },
   {
     id: "nvidia/nemotron-3-nano-30b-a3b",
     label: "Nemotron 3 Nano 30B",
     contextWindow: 131072,
     maxOutput: 4096,
+    reasoning: false,
   },
   {
     id: "moonshotai/kimi-k2.5",
     label: "Kimi K2.5",
     contextWindow: 131072,
     maxOutput: 4096,
+    reasoning: false,
   },
   {
     id: "qwen/qwen3.5-397b-a17b",
     label: "Qwen3.5 397B A17B",
     contextWindow: 131072,
     maxOutput: 4096,
+    reasoning: false,
   },
 ];
 

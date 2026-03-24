@@ -419,6 +419,63 @@ describe("Build-arg injection prevention (security)", () => {
     );
   });
 
+  // --- Model-aware reasoning and maxTokens configuration (#736) ---
+
+  it("Dockerfile Python config sets reasoning=True for reasoning-capable models", () => {
+    const repoDockerfile = path.join(__dirname, "..", "Dockerfile");
+    const content = fs.readFileSync(repoDockerfile, "utf8");
+    // Must define reasoning_models set
+    assert.match(
+      content,
+      /reasoning_models\s*=/,
+      "Dockerfile must define reasoning_models set for model-aware config"
+    );
+    // Nemotron 3 Super must be in the reasoning set
+    assert.match(
+      content,
+      /nvidia\/nemotron-3-super-120b-a12b.*reasoning_models|reasoning_models.*nvidia\/nemotron-3-super-120b-a12b/s,
+      "Nemotron 3 Super 120B must be listed as a reasoning model"
+    );
+  });
+
+  it("Dockerfile Python config uses model-aware maxTokens", () => {
+    const repoDockerfile = path.join(__dirname, "..", "Dockerfile");
+    const content = fs.readFileSync(repoDockerfile, "utf8");
+    // Must define model_max_tokens dict
+    assert.match(
+      content,
+      /model_max_tokens\s*=/,
+      "Dockerfile must define model_max_tokens for per-model output limits"
+    );
+    // Nemotron 3 Super should have 8192 maxTokens
+    assert.match(
+      content,
+      /nemotron-3-super-120b-a12b.*8192/s,
+      "Nemotron 3 Super must have 8192 maxTokens"
+    );
+  });
+
+  it("Dockerfile Python config uses model_entry helper to avoid hardcoded values", () => {
+    const repoDockerfile = path.join(__dirname, "..", "Dockerfile");
+    const content = fs.readFileSync(repoDockerfile, "utf8");
+    // Must define model_entry function and call it for both providers
+    assert.match(
+      content,
+      /def model_entry/,
+      "Dockerfile must define model_entry() helper"
+    );
+    assert.match(
+      content,
+      /model_entry\(model\.split/,
+      "nvidia provider must use model_entry() with split ID"
+    );
+    assert.match(
+      content,
+      /model_entry\(model, model\)/,
+      "inference provider must use model_entry() with full model ID"
+    );
+  });
+
   it("Dockerfile promotes ARGs to ENV for safe Python access", () => {
     const repoDockerfile = path.join(__dirname, "..", "Dockerfile");
     const content = fs.readFileSync(repoDockerfile, "utf8");
