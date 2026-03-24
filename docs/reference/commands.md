@@ -125,6 +125,25 @@ List available policy presets and show which ones are applied to the sandbox.
 $ nemoclaw my-assistant policy-list
 ```
 
+### `nemoclaw <name> model`
+
+View or change the active inference model for a sandbox.
+Without a subcommand, shows the current model and provider.
+
+```console
+$ nemoclaw my-assistant model
+$ nemoclaw my-assistant model list
+$ nemoclaw my-assistant model set moonshotai/kimi-k2.5
+```
+
+| Subcommand | Description |
+|---|---|
+| `list` | List available models for the sandbox's provider |
+| `set <model-id>` | Switch inference routing to a different model |
+
+Model changes take effect immediately via the gateway inference route.
+The sandbox `openclaw.json` is immutable by design and is not modified.
+
 ### `openshell term`
 
 Open the OpenShell TUI to monitor sandbox activity and approve network egress requests.
@@ -171,4 +190,82 @@ After the fixes complete, the script prompts you to run `nemoclaw onboard` to co
 
 ```console
 $ sudo nemoclaw setup-spark
+```
+
+### `nemoclaw debug`
+
+Collect diagnostic information for bug reports.
+Gathers system info, Docker state, sandbox health, and logs into a tarball.
+
+```console
+$ nemoclaw debug
+$ nemoclaw debug --quick
+$ nemoclaw debug --output /tmp/diag.tar.gz
+```
+
+| Option | Description |
+|---|---|
+| `--quick` | Minimal diagnostics (system info only) |
+| `--sandbox <name>` | Target a specific sandbox |
+| `--output <path>` | Save diagnostics tarball to a file |
+
+### `nemoclaw reconnect`
+
+Repair gateway and sandbox connectivity without re-onboarding.
+Useful after Docker restarts, WSL2 shutdowns, or network changes.
+
+```console
+$ nemoclaw reconnect
+$ nemoclaw reconnect my-sandbox
+$ nemoclaw reconnect --diagnose
+```
+
+| Option | Description |
+|---|---|
+| `--diagnose` | Show connectivity diagnostics without attempting repair |
+
+If repair fails, the command suggests running `nemoclaw onboard` as a fallback.
+
+### `nemoclaw update`
+
+Update NemoClaw to the latest version.
+Automatically detects the installation type (source checkout or global npm) and uses the appropriate update method.
+
+```console
+$ nemoclaw update
+$ nemoclaw update --check
+```
+
+| Option | Description |
+|---|---|
+| `--check` | Check for updates without installing |
+
+For source checkouts, runs `git fetch` + `git reset` + rebuild.
+For global npm installs, runs `npm install -g`.
+
+### `nemoclaw uninstall`
+
+Remove NemoClaw, sandboxes, and optionally Ollama models.
+Runs the local `uninstall.sh` if available, otherwise falls back to the remote script.
+
+```console
+$ nemoclaw uninstall
+$ nemoclaw uninstall --yes
+$ nemoclaw uninstall --yes --delete-models
+```
+
+| Option | Description |
+|---|---|
+| `--yes` | Skip the confirmation prompt |
+| `--keep-openshell` | Leave the openshell binary installed |
+| `--delete-models` | Remove NemoClaw-pulled Ollama models |
+
+### `nemoclaw help`
+
+Show the full CLI help text with all available commands and options.
+
+```console
+$ nemoclaw help
+$ nemoclaw --help
+$ nemoclaw -h
 ```
