@@ -126,44 +126,66 @@ async function setupSpark(deps = {}) {
   });
 }
 
-async function deploy(instanceName) {
+async function deploy(instanceName, deps = {}) {
+  const {
+    ensureApiKey: _ensureApiKey = ensureApiKey,
+    ensureGithubToken: _ensureGithubToken = ensureGithubToken,
+    isRepoPrivate: _isRepoPrivate = isRepoPrivate,
+    validateName: _validateName = validateName,
+    run: _run = run,
+    runInteractive: _runInteractive = runInteractive,
+    buildCredentialEnv: _buildCredentialEnv = buildCredentialEnv,
+    execFileSync: _execFileSync = execFileSync,
+    spawnSync: _spawnSync = spawnSync,
+    fs: _fs = fs,
+    os: _os = os,
+    path: _path = path,
+    log = console.log.bind(console),
+    logError = console.error.bind(console),
+    exit = process.exit.bind(process),
+    stdout = process.stdout,
+    gpu = process.env.NEMOCLAW_GPU || "a2-highgpu-1g:nvidia-tesla-a100:1",
+    sshRetries = 60,
+  } = deps;
+
   if (!instanceName) {
-    console.error("  Usage: nemoclaw deploy <instance-name>");
-    console.error("");
-    console.error("  Examples:");
-    console.error("    nemoclaw deploy my-gpu-box");
-    console.error("    nemoclaw deploy nemoclaw-prod");
-    console.error("    nemoclaw deploy nemoclaw-test");
-    console.error("");
-    console.error("  Help:  nemoclaw deploy --help");
-    process.exit(1);
+    logError("  Usage: nemoclaw deploy <instance-name>");
+    logError("");
+    logError("  Examples:");
+    logError("    nemoclaw deploy my-gpu-box");
+    logError("    nemoclaw deploy nemoclaw-prod");
+    logError("    nemoclaw deploy nemoclaw-test");
+    logError("");
+    logError("  Help:  nemoclaw deploy --help");
+    exit(1);
+    return;
   }
-  await ensureApiKey();
-  if (isRepoPrivate("NVIDIA/OpenShell")) {
-    await ensureGithubToken();
+  await _ensureApiKey();
+  if (_isRepoPrivate("NVIDIA/OpenShell")) {
+    await _ensureGithubToken();
   }
-  validateName(instanceName, "instance name");
+  _validateName(instanceName, "instance name");
   const name = instanceName;
   const qname = shellQuote(name);
-  const gpu = process.env.NEMOCLAW_GPU || "a2-highgpu-1g:nvidia-tesla-a100:1";
 
-  console.log("");
-  console.log(`  Deploying NemoClaw to Brev instance: ${name}`);
-  console.log("");
+  log("");
+  log(`  Deploying NemoClaw to Brev instance: ${name}`);
+  log("");
 
   try {
-    execFileSync("which", ["brev"], { stdio: "ignore" });
+    _execFileSync("which", ["brev"], { stdio: "ignore" });
   } catch {
-    console.error("  brev CLI not found.");
-    console.error("  Install it from: https://brev.nvidia.com");
-    console.error("");
-    console.error("  Then retry:  nemoclaw deploy " + name);
-    process.exit(1);
+    logError("  brev CLI not found.");
+    logError("  Install it from: https://brev.nvidia.com");
+    logError("");
+    logError("  Then retry:  nemoclaw deploy " + name);
+    exit(1);
+    return;
   }
 
   let exists = false;
   try {
-    const out = execFileSync("brev", ["ls"], { encoding: "utf-8" });
+    const out = _execFileSync("brev", ["ls"], { encoding: "utf-8" });
     exists = out.includes(name);
   } catch (err) {
     if (err.stdout && err.stdout.includes(name)) exists = true;
@@ -171,61 +193,62 @@ async function deploy(instanceName) {
   }
 
   if (!exists) {
-    console.log(`  Creating Brev instance '${name}' (${gpu})...`);
-    run(`brev create ${qname} --gpu ${shellQuote(gpu)}`);
+    log(`  Creating Brev instance '${name}' (${gpu})...`);
+    _run(`brev create ${qname} --gpu ${shellQuote(gpu)}`);
   } else {
-    console.log(`  Brev instance '${name}' already exists.`);
+    log(`  Brev instance '${name}' already exists.`);
   }
 
-  run(`brev refresh`, { ignoreError: true });
+  _run(`brev refresh`, { ignoreError: true });
 
-  process.stdout.write(`  Waiting for SSH `);
-  for (let i = 0; i < 60; i++) {
+  stdout.write(`  Waiting for SSH `);
+  for (let i = 0; i < sshRetries; i++) {
     try {
-      execFileSync("ssh", ["-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=no", name, "echo", "ok"], { encoding: "utf-8", stdio: "ignore" });
-      process.stdout.write(` ${G}✓${R}\n`);
+      _execFileSync("ssh", ["-o", "ConnectTimeout=5", "-o", "StrictHostKeyChecking=no", name, "echo", "ok"], { encoding: "utf-8", stdio: "ignore" });
+      stdout.write(` ${G}✓${R}\n`);
       break;
     } catch {
-      if (i === 59) {
-        process.stdout.write("\n");
-        console.error(`  Timed out waiting for SSH to ${name}`);
-        process.exit(1);
+      if (i === sshRetries - 1) {
+        stdout.write("\n");
+        logError(`  Timed out waiting for SSH to ${name}`);
+        exit(1);
+        return;
       }
-      process.stdout.write(".");
-      spawnSync("sleep", ["3"]);
+      stdout.write(".");
+      _spawnSync("sleep", ["3"]);
     }
   }
 
-  console.log("  Syncing NemoClaw to VM...");
-  run(`ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR ${qname} 'mkdir -p /home/ubuntu/nemoclaw'`);
-  run(`rsync -az --delete --exclude node_modules --exclude .git --exclude src -e "ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR" "${ROOT}/scripts" "${ROOT}/Dockerfile" "${ROOT}/nemoclaw" "${ROOT}/nemoclaw-blueprint" "${ROOT}/bin" "${ROOT}/package.json" ${qname}:/home/ubuntu/nemoclaw/`);
+  log("  Syncing NemoClaw to VM...");
+  _run(`ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR ${qname} 'mkdir -p /home/ubuntu/nemoclaw'`);
+  _run(`rsync -az --delete --exclude node_modules --exclude .git --exclude src -e "ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR" "${ROOT}/scripts" "${ROOT}/Dockerfile" "${ROOT}/nemoclaw" "${ROOT}/nemoclaw-blueprint" "${ROOT}/bin" "${ROOT}/package.json" ${qname}:/home/ubuntu/nemoclaw/`);
 
-  const credEnv = buildCredentialEnv();
+  const credEnv = _buildCredentialEnv();
   const envLines = Object.entries(credEnv).map(
     ([k, v]) => `${k}=${shellQuote(v)}`
   );
-  const envDir = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-env-"));
-  const envTmp = path.join(envDir, "env");
-  fs.writeFileSync(envTmp, envLines.join("\n") + "\n", { mode: 0o600 });
+  const envDir = _fs.mkdtempSync(_path.join(_os.tmpdir(), "nemoclaw-env-"));
+  const envTmp = _path.join(envDir, "env");
+  _fs.writeFileSync(envTmp, envLines.join("\n") + "\n", { mode: 0o600 });
   try {
-    run(`scp -q -o StrictHostKeyChecking=no -o LogLevel=ERROR ${shellQuote(envTmp)} ${qname}:/home/ubuntu/nemoclaw/.env`);
+    _run(`scp -q -o StrictHostKeyChecking=no -o LogLevel=ERROR ${shellQuote(envTmp)} ${qname}:/home/ubuntu/nemoclaw/.env`);
   } finally {
-    try { fs.unlinkSync(envTmp); } catch {}
-    try { fs.rmdirSync(envDir); } catch {}
+    try { _fs.unlinkSync(envTmp); } catch {}
+    try { _fs.rmdirSync(envDir); } catch {}
   }
 
-  console.log("  Running setup...");
-  runInteractive(`ssh -t -o StrictHostKeyChecking=no -o LogLevel=ERROR ${qname} 'cd /home/ubuntu/nemoclaw && set -a && . .env && set +a && bash scripts/brev-setup.sh'`);
+  log("  Running setup...");
+  _runInteractive(`ssh -t -o StrictHostKeyChecking=no -o LogLevel=ERROR ${qname} 'cd /home/ubuntu/nemoclaw && set -a && . .env && set +a && bash scripts/brev-setup.sh'`);
 
   if (credEnv.TELEGRAM_BOT_TOKEN) {
-    console.log("  Starting services...");
-    run(`ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR ${qname} 'cd /home/ubuntu/nemoclaw && set -a && . .env && set +a && bash scripts/start-services.sh'`);
+    log("  Starting services...");
+    _run(`ssh -o StrictHostKeyChecking=no -o LogLevel=ERROR ${qname} 'cd /home/ubuntu/nemoclaw && set -a && . .env && set +a && bash scripts/start-services.sh'`);
   }
 
-  console.log("");
-  console.log("  Connecting to sandbox...");
-  console.log("");
-  runInteractive(`ssh -t -o StrictHostKeyChecking=no -o LogLevel=ERROR ${qname} 'cd /home/ubuntu/nemoclaw && set -a && . .env && set +a && openshell sandbox connect nemoclaw'`);
+  log("");
+  log("  Connecting to sandbox...");
+  log("");
+  _runInteractive(`ssh -t -o StrictHostKeyChecking=no -o LogLevel=ERROR ${qname} 'cd /home/ubuntu/nemoclaw && set -a && . .env && set +a && openshell sandbox connect nemoclaw'`);
 }
 
 async function start(deps = {}) {
@@ -449,26 +472,33 @@ function sandboxLogs(sandboxName, follow) {
   run(`openshell logs ${shellQuote(sandboxName)}${followFlag}`);
 }
 
-async function sandboxPolicyAdd(sandboxName) {
-  const allPresets = policies.listPresets();
-  const applied = policies.getAppliedPresets(sandboxName);
+async function sandboxPolicyAdd(sandboxName, deps = {}) {
+  const {
+    listPresets = policies.listPresets.bind(policies),
+    getAppliedPresets = policies.getAppliedPresets.bind(policies),
+    applyPreset = policies.applyPreset.bind(policies),
+    prompt: askPrompt = require("./lib/credentials").prompt,
+    log = console.log.bind(console),
+  } = deps;
 
-  console.log("");
-  console.log("  Available presets:");
+  const allPresets = listPresets();
+  const applied = getAppliedPresets(sandboxName);
+
+  log("");
+  log("  Available presets:");
   allPresets.forEach((p) => {
     const marker = applied.includes(p.name) ? "●" : "○";
-    console.log(`    ${marker} ${p.name} — ${p.description}`);
+    log(`    ${marker} ${p.name} — ${p.description}`);
   });
-  console.log("");
+  log("");
 
-  const { prompt: askPrompt } = require("./lib/credentials");
   const answer = await askPrompt("  Preset to apply: ");
   if (!answer) return;
 
   const confirm = await askPrompt(`  Apply '${answer}' to sandbox '${sandboxName}'? [Y/n]: `);
   if (confirm.toLowerCase() === "n") return;
 
-  policies.applyPreset(sandboxName, answer);
+  applyPreset(sandboxName, answer);
 }
 
 function sandboxModel(sandboxName, actionArgs, deps = {}) {
@@ -562,27 +592,34 @@ function sandboxPolicyList(sandboxName) {
   console.log("");
 }
 
-async function sandboxDestroy(sandboxName, args = []) {
+async function sandboxDestroy(sandboxName, args = [], deps = {}) {
+  const {
+    prompt: askPrompt = require("./lib/credentials").prompt,
+    run: _run = run,
+    stopNimContainer = nim.stopNimContainer.bind(nim),
+    removeSandbox = registry.removeSandbox.bind(registry),
+    log = console.log.bind(console),
+  } = deps;
+
   const skipConfirm = args.includes("--yes") || args.includes("--force");
   if (!skipConfirm) {
-    const { prompt: askPrompt } = require("./lib/credentials");
     const answer = await askPrompt(
       `  ${YW}Destroy sandbox '${sandboxName}'?${R} This cannot be undone. [y/N]: `,
     );
     if (answer.trim().toLowerCase() !== "y" && answer.trim().toLowerCase() !== "yes") {
-      console.log("  Cancelled.");
+      log("  Cancelled.");
       return;
     }
   }
 
-  console.log(`  Stopping NIM for '${sandboxName}'...`);
-  nim.stopNimContainer(sandboxName);
+  log(`  Stopping NIM for '${sandboxName}'...`);
+  stopNimContainer(sandboxName);
 
-  console.log(`  Deleting sandbox '${sandboxName}'...`);
-  run(`openshell sandbox delete ${shellQuote(sandboxName)} 2>/dev/null || true`, { ignoreError: true });
+  log(`  Deleting sandbox '${sandboxName}'...`);
+  _run(`openshell sandbox delete ${shellQuote(sandboxName)} 2>/dev/null || true`, { ignoreError: true });
 
-  registry.removeSandbox(sandboxName);
-  console.log(`  ${G}✓${R} Sandbox '${sandboxName}' destroyed`);
+  removeSandbox(sandboxName);
+  log(`  Sandbox '${sandboxName}' destroyed`);
 }
 
 // ── Reconnect ─────────────────────────────────────────────────────
@@ -786,6 +823,7 @@ if (typeof module !== "undefined" && module.exports) {
     exitWithSpawnResult,
     setup,
     setupSpark,
+    deploy,
     start,
     stop,
     debug: debug,
@@ -793,6 +831,8 @@ if (typeof module !== "undefined" && module.exports) {
     showStatus,
     sandboxStatus,
     sandboxModel,
+    sandboxPolicyAdd,
+    sandboxDestroy,
     reconnectCmd,
     update,
     REMOTE_UNINSTALL_URL,
