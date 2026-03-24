@@ -37,7 +37,7 @@ const policies = require("./lib/policies");
 
 const GLOBAL_COMMANDS = new Set([
   "onboard", "list", "deploy", "setup", "setup-spark",
-  "start", "stop", "status", "debug", "uninstall",
+  "start", "stop", "status", "debug", "uninstall", "update",
   "help", "--help", "-h", "--version", "-v",
 ]);
 
@@ -392,6 +392,76 @@ async function sandboxDestroy(sandboxName, args = []) {
   console.log(`  ${G}✓${R} Sandbox '${sandboxName}' destroyed`);
 }
 
+// ── Update ────────────────────────────────────────────────────────
+
+async function update(args) {
+  const {
+    detectInstallType,
+    checkForUpdate,
+    updateSource,
+    updateGlobal,
+    verifyUpdate,
+  } = require("./lib/update");
+
+  const checkOnly = args.includes("--check");
+
+  const install = detectInstallType();
+  logDebug("update: install type=%s sourceDir=%s", install.type, install.sourceDir);
+
+  if (install.type === "unknown") {
+    console.error("  Could not detect NemoClaw installation type.");
+    console.error("  Re-install with:  curl -fsSL https://raw.githubusercontent.com/NVIDIA/NemoClaw/main/install.sh | bash");
+    process.exit(1);
+  }
+
+  console.log(`  Installation: ${install.type === "source" ? `source checkout (${install.sourceDir})` : "global npm"}`);
+
+  const status = checkForUpdate(install);
+  if (status.error) {
+    console.error(`  ${status.error}`);
+    process.exit(1);
+  }
+
+  console.log(`  Current version: v${status.currentVersion}${status.current ? ` (${status.current})` : ""}`);
+  console.log(`  Latest commit:   ${status.remote}`);
+
+  if (!status.updateAvailable) {
+    console.log(`  ${G}✓${R} Already up to date.`);
+    return;
+  }
+
+  if (checkOnly) {
+    console.log(`  ${YW}Update available.${R}  Run ${B}nemoclaw update${R} to install.`);
+    return;
+  }
+
+  console.log("");
+  console.log("  Updating NemoClaw...");
+  console.log("");
+
+  let ok;
+  if (install.type === "source") {
+    ok = updateSource(install.sourceDir);
+  } else {
+    ok = updateGlobal();
+  }
+
+  if (!ok) {
+    console.error("");
+    console.error("  Update failed. You can re-install manually:");
+    console.error("    curl -fsSL https://raw.githubusercontent.com/NVIDIA/NemoClaw/main/install.sh | bash");
+    process.exit(1);
+  }
+
+  const versionStr = verifyUpdate();
+  console.log("");
+  if (versionStr) {
+    console.log(`  ${G}✓${R} Updated successfully: ${versionStr}`);
+  } else {
+    console.log(`  ${G}✓${R} Update complete. Verify with: nemoclaw --version`);
+  }
+}
+
 // ── Help ─────────────────────────────────────────────────────────
 
 function help() {
@@ -427,6 +497,10 @@ function help() {
     nemoclaw --verbose <command>     Show debug output ${D}(or --debug, LOG_LEVEL=debug)${R}
     nemoclaw debug [--quick]         Collect diagnostics for bug reports
     nemoclaw debug --output FILE     Save diagnostics tarball for GitHub issues
+
+  Updates:
+    nemoclaw update                  Update NemoClaw to the latest version
+    nemoclaw update --check          Check for updates without installing
 
   Cleanup:
     nemoclaw uninstall [flags]       Run uninstall.sh (local first, curl fallback)
@@ -482,6 +556,7 @@ if (isVerbose()) {
       case "status":      showStatus(); break;
       case "debug":       debug(args); break;
       case "uninstall":   uninstall(args); break;
+      case "update":      await update(args); break;
       case "list":        listSandboxes(); break;
       case "--version":
       case "-v": {
