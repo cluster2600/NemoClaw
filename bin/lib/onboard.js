@@ -967,6 +967,52 @@ async function setupInferenceBackend(sandboxName, model, provider, gpu) {
 
 // ── Step 5: Inference routing ────────────────────────────────────
 
+/**
+ * Run `openshell inference set` and verify it succeeded.
+ * Previous versions silently swallowed failures (2>/dev/null || true)
+ * which caused the sandbox to fall back to the default model —
+ * the root cause of #714 (kimi selected → nemotron used).
+ *
+ * On failure the helper retries once after a short delay (the gateway
+ * may still be starting on macOS Docker Desktop) and emits a visible
+ * warning with a manual remediation command.
+ *
+ * @param {string} providerName  Provider id (nvidia-nim, ollama-local, …)
+ * @param {string} model         Model id (e.g. moonshotai/kimi-k2.5)
+ * @param {{ maxRetries?: number, run?: Function, sleep?: Function }} [opts]
+ * @returns {boolean} true if the route was set successfully
+ */
+function setInferenceRoute(providerName, model, opts = {}) {
+  const maxRetries = opts.maxRetries ?? 1;
+  const execRun = opts.run ?? run;
+  const execSleep = opts.sleep ?? (() => spawnSync("sleep", ["2"]));
+
+  const cmd =
+    `openshell inference set --no-verify --provider ${shellQuote(providerName)} --model ${shellQuote(model)}`;
+
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    const result = execRun(cmd + " 2>&1", {
+      ignoreError: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    if (result.status === 0) return true;
+
+    if (attempt < maxRetries) {
+      // Gateway may still be initialising — wait briefly and retry.
+      execSleep();
+    }
+  }
+
+  // All attempts failed — warn loudly so the user knows what to fix.
+  console.error("");
+  console.error(`  ⚠  Could not set inference route to model '${model}'.`);
+  console.error(`     The sandbox may use the default model instead.`);
+  console.error(`     To fix manually, run:`);
+  console.error(`       openshell inference set --provider ${providerName} --model ${shellQuote(model)}`);
+  console.error("");
+  return false;
+}
+
 async function setupInference(sandboxName, model, provider) {
   step(5, 7, "Setting up inference provider");
 
@@ -980,10 +1026,7 @@ async function setupInference(sandboxName, model, provider) {
       `--config "OPENAI_BASE_URL=https://integrate.api.nvidia.com/v1" 2>&1 || true`,
       { ignoreError: true, env: { _NEMOCLAW_CRED: apiKey || "" } }
     );
-    run(
-      `openshell inference set --no-verify --provider nvidia-nim --model ${shellQuote(model)} 2>/dev/null || true`,
-      { ignoreError: true }
-    );
+    setInferenceRoute("nvidia-nim", model);
   } else if (provider === "vllm-local") {
     const validation = validateLocalProvider(provider, runCapture);
     if (!validation.ok) {
@@ -999,10 +1042,7 @@ async function setupInference(sandboxName, model, provider) {
       `--config "OPENAI_BASE_URL=${baseUrl}" 2>&1 || true`,
       { ignoreError: true }
     );
-    run(
-      `openshell inference set --no-verify --provider vllm-local --model ${shellQuote(model)} 2>/dev/null || true`,
-      { ignoreError: true }
-    );
+    setInferenceRoute("vllm-local", model);
   } else if (provider === "ollama-local") {
     const validation = validateLocalProvider(provider, runCapture);
     if (!validation.ok) {
@@ -1019,10 +1059,7 @@ async function setupInference(sandboxName, model, provider) {
       `--config "OPENAI_BASE_URL=${baseUrl}" 2>&1 || true`,
       { ignoreError: true }
     );
-    run(
-      `openshell inference set --no-verify --provider ollama-local --model ${shellQuote(model)} 2>/dev/null || true`,
-      { ignoreError: true }
-    );
+    setInferenceRoute("ollama-local", model);
     console.log(`  Priming Ollama model: ${model}`);
     run(getOllamaWarmupCommand(model), { ignoreError: true });
     const probe = validateOllamaModel(model, runCapture);
@@ -1249,6 +1286,7 @@ module.exports = {
   patchDockerfileModel,
   patchDockerfileVersion,
   printDashboard,
+  setInferenceRoute,
   selectInferenceProvider,
   setupNim,
   writeSandboxConfigSyncFile,
