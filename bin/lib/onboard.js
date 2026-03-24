@@ -200,7 +200,8 @@ function writeSandboxConfigSyncFile(script, tmpDir = os.tmpdir(), now = Date.now
   return scriptFile;
 }
 
-async function promptCloudModel() {
+async function promptCloudModel(_prompt) {
+  const _p = _prompt || prompt;
   console.log("");
   console.log("  Cloud models:");
   CLOUD_MODEL_OPTIONS.forEach((option, index) => {
@@ -208,14 +209,18 @@ async function promptCloudModel() {
   });
   console.log("");
 
-  const choice = await prompt("  Choose model [1]: ");
+  const choice = await _p("  Choose model [1]: ");
   const index = parseInt(choice || "1", 10) - 1;
   return (CLOUD_MODEL_OPTIONS[index] || CLOUD_MODEL_OPTIONS[0]).id;
 }
 
-async function promptOllamaModel() {
-  const options = getOllamaModelOptions(runCapture);
-  const defaultModel = getDefaultOllamaModel(runCapture);
+async function promptOllamaModel(_runCapture, _getOllamaModelOptions, _getDefaultOllamaModel, _prompt) {
+  const rc = _runCapture || runCapture;
+  const gomo = _getOllamaModelOptions || getOllamaModelOptions;
+  const gdom = _getDefaultOllamaModel || getDefaultOllamaModel;
+  const p = _prompt || prompt;
+  const options = gomo(rc);
+  const defaultModel = gdom(rc);
   const defaultIndex = Math.max(0, options.indexOf(defaultModel));
 
   console.log("");
@@ -225,7 +230,7 @@ async function promptOllamaModel() {
   });
   console.log("");
 
-  const choice = await prompt(`  Choose model [${defaultIndex + 1}]: `);
+  const choice = await p(`  Choose model [${defaultIndex + 1}]: `);
   const index = parseInt(choice || String(defaultIndex + 1), 10) - 1;
   return options[index] || options[defaultIndex] || defaultModel;
 }
@@ -447,11 +452,20 @@ async function preflight() {
 
 // ── Step 2: Gateway ──────────────────────────────────────────────
 
-async function startGateway(gpu) {
-  step(2, 7, "Starting OpenShell gateway");
+async function startGateway(gpu, deps) {
+  const _step = (deps && deps.step) || step;
+  const _run = (deps && deps.run) || run;
+  const _runCapture = (deps && deps.runCapture) || runCapture;
+  const _sleep = (deps && deps.sleep) || sleep;
+  const _getInstalledOpenshellVersion = (deps && deps.getInstalledOpenshellVersion) || getInstalledOpenshellVersion;
+  const _getContainerRuntime = (deps && deps.getContainerRuntime) || getContainerRuntime;
+  const _shouldPatchCoredns = (deps && deps.shouldPatchCoredns) || shouldPatchCoredns;
+  const _exit = (deps && deps.exit) || process.exit;
+
+  _step(2, 7, "Starting OpenShell gateway");
 
   // Destroy old gateway
-  run("openshell gateway destroy -g nemoclaw 2>/dev/null || true", { ignoreError: true });
+  _run("openshell gateway destroy -g nemoclaw 2>/dev/null || true", { ignoreError: true });
 
   const gwArgs = ["--name", "nemoclaw"];
   // Do NOT pass --gpu here. On DGX Spark (and most GPU hosts), inference is
@@ -460,7 +474,7 @@ async function startGateway(gpu) {
   // FailedPrecondition errors when the gateway's k3s device plugin cannot
   // allocate GPUs. See: https://build.nvidia.com/spark/nemoclaw/instructions
   const gatewayEnv = {};
-  const openshellVersion = getInstalledOpenshellVersion();
+  const openshellVersion = _getInstalledOpenshellVersion();
   const stableGatewayImage = openshellVersion
     ? `ghcr.io/nvidia/openshell/cluster:${openshellVersion}`
     : null;
@@ -470,35 +484,36 @@ async function startGateway(gpu) {
     console.log(`  Using pinned OpenShell gateway image: ${stableGatewayImage}`);
   }
 
-  run(`openshell gateway start ${gwArgs.join(" ")}`, {
+  _run(`openshell gateway start ${gwArgs.join(" ")}`, {
     ignoreError: false,
     env: gatewayEnv,
   });
 
   // Verify health
   for (let i = 0; i < 5; i++) {
-    const status = runCapture("openshell status 2>&1", { ignoreError: true });
+    const status = _runCapture("openshell status 2>&1", { ignoreError: true });
     if (status.includes("Connected")) {
       console.log("  ✓ Gateway is healthy");
       break;
     }
     if (i === 4) {
       console.error("  Gateway failed to start. Run: openshell gateway info");
-      process.exit(1);
+      _exit(1);
+      return;
     }
-    sleep(2);
+    _sleep(2);
   }
 
   // CoreDNS fix — k3s-inside-Docker has broken DNS on all Docker-based
   // runtimes: CoreDNS forwards to 127.0.0.11 which is unreachable from pods.
   // Ref: https://github.com/NVIDIA/NemoClaw/issues/626
-  const runtime = getContainerRuntime();
-  if (shouldPatchCoredns(runtime)) {
+  const runtime = _getContainerRuntime();
+  if (_shouldPatchCoredns(runtime)) {
     console.log(`  Patching CoreDNS for ${runtime}...`);
-    run(`bash "${path.join(SCRIPTS, "fix-coredns.sh")}" nemoclaw ${runtime} 2>&1 || true`, { ignoreError: true });
+    _run(`bash "${path.join(SCRIPTS, "fix-coredns.sh")}" nemoclaw ${runtime} 2>&1 || true`, { ignoreError: true });
   }
   // Give DNS a moment to propagate
-  sleep(5);
+  _sleep(5);
 }
 
 // ── Step 4: Sandbox ──────────────────────────────────────────────
@@ -749,28 +764,48 @@ async function createSandbox(gpu, model) {
 // image is built, allowing openclaw.json to contain the correct model.
 // Ref: https://github.com/NVIDIA/NemoClaw/issues/628
 
-async function selectInferenceProvider(gpu) {
-  step(3, 7, "Selecting inference provider");
+async function selectInferenceProvider(gpu, deps) {
+  const _step = (deps && deps.step) || step;
+  const _runCapture = (deps && deps.runCapture) || runCapture;
+  const _run = (deps && deps.run) || run;
+  const _sleep = (deps && deps.sleep) || sleep;
+  const _prompt = (deps && deps.prompt) || prompt;
+  const _ensureApiKey = (deps && deps.ensureApiKey) || ensureApiKey;
+  const _getCredential = (deps && deps.getCredential) || getCredential;
+  const _isNonInteractive = (deps && deps.isNonInteractive) || isNonInteractive;
+  const _getNonInteractiveProvider = (deps && deps.getNonInteractiveProvider) || getNonInteractiveProvider;
+  const _getNonInteractiveModel = (deps && deps.getNonInteractiveModel) || getNonInteractiveModel;
+  const _hasInstalledOllamaModels = (deps && deps.hasInstalledOllamaModels) || hasInstalledOllamaModels;
+  const _getOllamaBindAddressHint = (deps && deps.getOllamaBindAddressHint) || getOllamaBindAddressHint;
+  const _validateLocalProvider = (deps && deps.validateLocalProvider) || validateLocalProvider;
+  const _getDefaultOllamaModel = (deps && deps.getDefaultOllamaModel) || getDefaultOllamaModel;
+  const _getOllamaModelOptions = (deps && deps.getOllamaModelOptions) || getOllamaModelOptions;
+  const _nim = (deps && deps.nim) || nim;
+  const _platform = (deps && deps.platform) || process.platform;
+  const _experimental = deps && deps.experimental !== undefined ? deps.experimental : EXPERIMENTAL;
+  const _exit = (deps && deps.exit) || process.exit;
+
+  _step(3, 7, "Selecting inference provider");
 
   let model = null;
   let provider = "nvidia-nim";
 
   // Detect local inference options
-  const hasOllama = !!runCapture("command -v ollama", { ignoreError: true });
-  const ollamaRunning = !!runCapture("curl -sf http://localhost:11434/api/tags 2>/dev/null", { ignoreError: true });
-  const vllmRunning = !!runCapture("curl -sf http://localhost:8000/v1/models 2>/dev/null", { ignoreError: true });
-  const requestedProvider = isNonInteractive() ? getNonInteractiveProvider() : null;
-  const requestedModel = isNonInteractive() ? getNonInteractiveModel(requestedProvider || "cloud") : null;
+  const hasOllama = !!_runCapture("command -v ollama", { ignoreError: true });
+  const ollamaRunning = !!_runCapture("curl -sf http://localhost:11434/api/tags 2>/dev/null", { ignoreError: true });
+  const vllmRunning = !!_runCapture("curl -sf http://localhost:8000/v1/models 2>/dev/null", { ignoreError: true });
+  const requestedProvider = _isNonInteractive() ? _getNonInteractiveProvider() : null;
+  const requestedModel = _isNonInteractive() ? _getNonInteractiveModel(requestedProvider || "cloud") : null;
   // Build options list — only show local options with NEMOCLAW_EXPERIMENTAL=1
   const options = [];
-  if (EXPERIMENTAL && gpu && gpu.nimCapable) {
+  if (_experimental && gpu && gpu.nimCapable) {
     options.push({ key: "nim", label: "Local NIM container (NVIDIA GPU) [experimental]" });
   }
   options.push({
     key: "cloud",
     label:
       "NVIDIA Endpoint API (build.nvidia.com)" +
-      (!ollamaRunning && !(EXPERIMENTAL && vllmRunning) ? " (recommended)" : ""),
+      (!ollamaRunning && !(_experimental && vllmRunning) ? " (recommended)" : ""),
   });
   if (hasOllama || ollamaRunning) {
     options.push({
@@ -780,7 +815,7 @@ async function selectInferenceProvider(gpu) {
         (ollamaRunning ? " (suggested)" : ""),
     });
   }
-  if (EXPERIMENTAL && vllmRunning) {
+  if (_experimental && vllmRunning) {
     options.push({
       key: "vllm",
       label: "Existing vLLM instance (localhost:8000) — running [experimental] (suggested)",
@@ -788,19 +823,20 @@ async function selectInferenceProvider(gpu) {
   }
 
   // On macOS without Ollama, offer to install it
-  if (!hasOllama && process.platform === "darwin") {
+  if (!hasOllama && _platform === "darwin") {
     options.push({ key: "install-ollama", label: "Install Ollama (macOS)" });
   }
 
   if (options.length > 1) {
     let selected;
 
-    if (isNonInteractive()) {
+    if (_isNonInteractive()) {
       const providerKey = requestedProvider || "cloud";
       selected = options.find((o) => o.key === providerKey);
       if (!selected) {
         console.error(`  Requested provider '${providerKey}' is not available in this environment.`);
-        process.exit(1);
+        _exit(1);
+        return { model, provider };
       }
       note(`  [non-interactive] Provider: ${selected.key}`);
     } else {
@@ -821,24 +857,25 @@ async function selectInferenceProvider(gpu) {
       console.log("");
 
       const defaultIdx = options.findIndex((o) => o.key === "cloud") + 1;
-      const choice = await prompt(`  Choose [${defaultIdx}]: `);
+      const choice = await _prompt(`  Choose [${defaultIdx}]: `);
       const idx = parseInt(choice || String(defaultIdx), 10) - 1;
       selected = options[idx] || options[defaultIdx - 1];
     }
 
     if (selected.key === "nim") {
       // List models that fit GPU VRAM
-      const models = nim.listModels().filter((m) => m.minGpuMemoryMB <= gpu.totalMemoryMB);
+      const models = _nim.listModels().filter((m) => m.minGpuMemoryMB <= gpu.totalMemoryMB);
       if (models.length === 0) {
         console.log("  No NIM models fit your GPU VRAM. Falling back to cloud API.");
       } else {
         let sel;
-        if (isNonInteractive()) {
+        if (_isNonInteractive()) {
           if (requestedModel) {
             sel = models.find((m) => m.name === requestedModel);
             if (!sel) {
               console.error(`  Unsupported NEMOCLAW_MODEL for NIM: ${requestedModel}`);
-              process.exit(1);
+              _exit(1);
+              return { model, provider };
             }
           } else {
             sel = models[0];
@@ -852,7 +889,7 @@ async function selectInferenceProvider(gpu) {
           });
           console.log("");
 
-          const modelChoice = await prompt(`  Choose model [1]: `);
+          const modelChoice = await _prompt(`  Choose model [1]: `);
           const midx = parseInt(modelChoice || "1", 10) - 1;
           sel = models[midx] || models[0];
         }
@@ -862,56 +899,59 @@ async function selectInferenceProvider(gpu) {
     } else if (selected.key === "ollama") {
       if (!ollamaRunning) {
         console.log("  Starting Ollama...");
-        run("OLLAMA_HOST=0.0.0.0:11434 ollama serve > /dev/null 2>&1 &", { ignoreError: true });
-        sleep(2);
+        _run("OLLAMA_HOST=0.0.0.0:11434 ollama serve > /dev/null 2>&1 &", { ignoreError: true });
+        _sleep(2);
       }
       // Early validation: warn about missing models BEFORE sandbox creation (#710)
-      if (!hasInstalledOllamaModels(runCapture)) {
+      if (!_hasInstalledOllamaModels(_runCapture)) {
         console.error("");
         console.error("  No Ollama models are installed locally.");
         console.error(`  Pull a model first:  ollama pull ${DEFAULT_OLLAMA_MODEL}`);
         console.error("  Then re-run:  nemoclaw onboard");
-        process.exit(1);
+        _exit(1);
+        return { model, provider };
       }
       // Early validation: warn about bind address on Linux (#709)
-      const bindHint = getOllamaBindAddressHint();
+      const bindHint = _getOllamaBindAddressHint();
       if (bindHint) {
-        const earlyValidation = validateLocalProvider("ollama-local", runCapture);
+        const earlyValidation = _validateLocalProvider("ollama-local", _runCapture);
         if (!earlyValidation.ok) {
           console.error("");
           console.error(`  ${earlyValidation.message}`);
           console.error("");
           console.error(`  ${bindHint}`);
-          process.exit(1);
+          _exit(1);
+          return { model, provider };
         }
       }
       console.log("  ✓ Using Ollama on localhost:11434");
       provider = "ollama-local";
-      if (isNonInteractive()) {
-        model = requestedModel || getDefaultOllamaModel(runCapture);
+      if (_isNonInteractive()) {
+        model = requestedModel || _getDefaultOllamaModel(_runCapture);
       } else {
-        model = await promptOllamaModel();
+        model = await promptOllamaModel(_runCapture, _getOllamaModelOptions, _getDefaultOllamaModel, _prompt);
       }
     } else if (selected.key === "install-ollama") {
       console.log("  Installing Ollama via Homebrew...");
-      run("brew install ollama", { ignoreError: true });
+      _run("brew install ollama", { ignoreError: true });
       console.log("  Starting Ollama...");
-      run("OLLAMA_HOST=0.0.0.0:11434 ollama serve > /dev/null 2>&1 &", { ignoreError: true });
-        sleep(2);
+      _run("OLLAMA_HOST=0.0.0.0:11434 ollama serve > /dev/null 2>&1 &", { ignoreError: true });
+        _sleep(2);
       // Early validation: warn about missing models BEFORE sandbox creation (#710)
-      if (!hasInstalledOllamaModels(runCapture)) {
+      if (!_hasInstalledOllamaModels(_runCapture)) {
         console.error("");
         console.error("  Ollama was installed but no models are available yet.");
         console.error(`  Pull a model first:  ollama pull ${DEFAULT_OLLAMA_MODEL}`);
         console.error("  Then re-run:  nemoclaw onboard");
-        process.exit(1);
+        _exit(1);
+        return { model, provider };
       }
       console.log("  ✓ Using Ollama on localhost:11434");
       provider = "ollama-local";
-      if (isNonInteractive()) {
-        model = requestedModel || getDefaultOllamaModel(runCapture);
+      if (_isNonInteractive()) {
+        model = requestedModel || _getDefaultOllamaModel(_runCapture);
       } else {
-        model = await promptOllamaModel();
+        model = await promptOllamaModel(_runCapture, _getOllamaModelOptions, _getDefaultOllamaModel, _prompt);
       }
     } else if (selected.key === "vllm") {
       console.log("  ✓ Using existing vLLM on localhost:8000");
@@ -922,16 +962,17 @@ async function selectInferenceProvider(gpu) {
   }
 
   if (provider === "nvidia-nim") {
-    if (isNonInteractive()) {
+    if (_isNonInteractive()) {
       // In non-interactive mode, NVIDIA_API_KEY must be set via env var
-      if (!getCredential("NVIDIA_API_KEY")) {
+      if (!_getCredential("NVIDIA_API_KEY")) {
         console.error("  NVIDIA_API_KEY is required for cloud provider in non-interactive mode.");
         console.error("  Set it via env var or save to ~/.nemoclaw/credentials.json");
-        process.exit(1);
+        _exit(1);
+        return { model, provider };
       }
     } else {
-      await ensureApiKey();
-      model = model || (await promptCloudModel()) || DEFAULT_CLOUD_MODEL;
+      await _ensureApiKey();
+      model = model || (await promptCloudModel(_prompt)) || DEFAULT_CLOUD_MODEL;
     }
     model = model || requestedModel || DEFAULT_CLOUD_MODEL;
     console.log(`  Using NVIDIA Endpoint API with model: ${model}`);
@@ -1345,6 +1386,8 @@ module.exports = {
   patchDockerfileModel,
   patchDockerfileVersion,
   printDashboard,
+  promptCloudModel,
+  promptOllamaModel,
   promptOrDefault,
   setInferenceRoute,
   selectInferenceProvider,
@@ -1354,6 +1397,7 @@ module.exports = {
   setupOpenclaw,
   setupPolicies,
   sleep,
+  startGateway,
   step,
   waitForSandboxReady,
   writeSandboxConfigSyncFile,
