@@ -8,6 +8,7 @@ import json
 import os
 import subprocess
 from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -30,7 +31,7 @@ from orchestrator.runner import (
 # Fixtures
 # ---------------------------------------------------------------------------
 
-SAMPLE_BLUEPRINT: dict = {
+SAMPLE_BLUEPRINT: dict[str, Any] = {
     "version": "0.1.0",
     "components": {
         "sandbox": {
@@ -229,7 +230,7 @@ class TestActionPlan:
         action_plan("default", SAMPLE_BLUEPRINT)
         out = capsys.readouterr().out
         # Extract JSON from output (after PROGRESS and RUN_ID lines)
-        json_lines = []
+        json_lines: list[str] = []
         capture = False
         for line in out.splitlines():
             if line.startswith("{"):

@@ -6,6 +6,9 @@ license = "Apache-2.0"
 requires-python = ">=3.11"
 dependencies = ["pyyaml>=6.0"]
 
+[dependency-groups]
+dev = ["pytest>=8.0", "pytest>=8.0"]
+
 [tool.uv]
 managed = true
 
@@ -40,7 +43,7 @@ ignore = [
 [tool.pyright]
 pythonVersion = "3.11"
 typeCheckingMode = "strict"
-include = ["orchestrator", "migrations"]
+include = ["orchestrator", "migrations", "tests"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
