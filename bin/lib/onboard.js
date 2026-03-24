@@ -1457,6 +1457,7 @@ module.exports = {
   sleep,
   startGateway,
   step,
+  streamSandboxCreate,
   waitForSandboxReady,
   writeSandboxConfigSyncFile,
 };
