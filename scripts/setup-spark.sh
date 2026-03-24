@@ -30,8 +30,6 @@ info() { echo -e "${GREEN}>>>${NC} $1"; }
 warn() { echo -e "${YELLOW}>>>${NC} $1"; }
 fail() { echo -e "${RED}>>>${NC} $1"; exit 1; }
 
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-
 # ── Pre-flight checks ─────────────────────────────────────────────
 
 if [ "$(uname -s)" != "Linux" ]; then
@@ -132,10 +130,16 @@ if [ "$NEEDS_RESTART" = true ]; then
   info "Docker restarted with cgroupns=host"
 fi
 
-# ── 4. Run normal setup ──────────────────────────────────────────
+# ── 4. Done ──────────────────────────────────────────────────────
 
 echo ""
 info "DGX Spark Docker configuration complete."
 info ""
-info "Next step: run 'nemoclaw onboard' to set up your sandbox."
+info "The Docker daemon is now configured for cgroup v2 (cgroupns=host),"
+info "which is required for running OpenShell sandboxes on DGX Spark."
+info ""
+info "Next step: run 'nemoclaw onboard' to create a sandbox."
+info "If you already onboarded before this script, run onboard again"
+info "so it can build a fresh sandbox image with the new Docker config."
+info ""
 info "  nemoclaw onboard"

@@ -23,8 +23,8 @@
 ## Checklist
 
 ### General
-- [ ] I have read and followed the [contributing guide](CONTRIBUTING.md).
-- [ ] I have read and followed the [style guide](docs/CONTRIBUTING.md). (for doc-only changes)
+- [ ] I have read and followed the [contributing guide](../CONTRIBUTING.md).
+- [ ] I have read and followed the [style guide](../docs/CONTRIBUTING.md). (for doc-only changes)
 
 ### Code Changes
 <!-- Skip if this is a doc-only PR. -->
@@ -35,6 +35,6 @@
 
 ### Doc Changes
 <!-- Skip if this PR has no doc changes. -->
-- [ ] Follows the [style guide](docs/CONTRIBUTING.md). Try running the `update-docs` agent skill to draft changes while complying with the style guide. For example, prompt your agent with "`/update-docs` catch up the docs for the new changes I made in this PR."
+- [ ] Follows the [style guide](../docs/CONTRIBUTING.md). Try running the `update-docs` agent skill to draft changes while complying with the style guide. For example, prompt your agent with "`/update-docs` catch up the docs for the new changes I made in this PR."
 - [ ] New pages include SPDX license header and frontmatter, if creating a new page.
 - [ ] Cross-references and links verified.
