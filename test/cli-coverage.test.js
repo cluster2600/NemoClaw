@@ -368,3 +368,183 @@ describe("update CLI dispatch", () => {
     );
   });
 });
+
+// ── --json output for list and status (#753) ─────────────────────
+
+describe("list --json", () => {
+  it("outputs valid JSON with sandbox data", () => {
+    const ctx = makeSandboxHome({ policies: ["base", "pypi"] });
+    try {
+      const r = runCli(["list", "--json"], { HOME: ctx.home });
+      assert.equal(r.code, 0);
+      const data = JSON.parse(r.stdout);
+      assert.equal(data.sandboxes.length, 1);
+      assert.equal(data.sandboxes[0].name, "test-sb");
+      assert.equal(data.sandboxes[0].default, true);
+      assert.equal(data.sandboxes[0].model, "nemotron-mini");
+      assert.equal(data.sandboxes[0].provider, "ollama-local");
+      assert.equal(data.sandboxes[0].gpuEnabled, false);
+      assert.deepEqual(data.sandboxes[0].policies, ["base", "pypi"]);
+      assert.equal(data.defaultSandbox, "test-sb");
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("outputs empty sandboxes array when none registered", () => {
+    const r = runCli(["list", "--json"]);
+    assert.equal(r.code, 0);
+    const data = JSON.parse(r.stdout);
+    assert.deepEqual(data.sandboxes, []);
+    assert.equal(data.defaultSandbox, null);
+  });
+
+  it("outputs multiple sandboxes with correct default marker", () => {
+    const home = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-json-multi-"));
+    const dir = path.join(home, ".nemoclaw");
+    fs.mkdirSync(dir, { recursive: true });
+    const reg = {
+      sandboxes: {
+        "sb-a": {
+          name: "sb-a", model: "nemotron-super", provider: "nvidia-nim",
+          gpuEnabled: true, policies: ["base"], createdAt: "2026-01-01T00:00:00.000Z",
+        },
+        "sb-b": {
+          name: "sb-b", model: null, provider: null,
+          gpuEnabled: false, policies: [], createdAt: "2026-01-02T00:00:00.000Z",
+        },
+      },
+      defaultSandbox: "sb-a",
+    };
+    fs.writeFileSync(path.join(dir, "sandboxes.json"), JSON.stringify(reg));
+    try {
+      const r = runCli(["list", "--json"], { HOME: home });
+      assert.equal(r.code, 0);
+      const data = JSON.parse(r.stdout);
+      assert.equal(data.sandboxes.length, 2);
+      const sbA = data.sandboxes.find((s) => s.name === "sb-a");
+      const sbB = data.sandboxes.find((s) => s.name === "sb-b");
+      assert.equal(sbA.default, true);
+      assert.equal(sbA.gpuEnabled, true);
+      assert.equal(sbB.default, false);
+      assert.equal(sbB.model, null);
+      assert.deepEqual(sbB.policies, []);
+    } finally {
+      fs.rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("does not include ANSI escape codes", () => {
+    const ctx = makeSandboxHome();
+    try {
+      const r = runCli(["list", "--json"], { HOME: ctx.home });
+      assert.ok(!r.stdout.includes("\x1b["), "JSON output should not contain ANSI codes");
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("null model/provider become JSON null not 'unknown'", () => {
+    const ctx = makeSandboxHome({ model: null, provider: null });
+    try {
+      const r = runCli(["list", "--json"], { HOME: ctx.home });
+      const data = JSON.parse(r.stdout);
+      assert.strictEqual(data.sandboxes[0].model, null);
+      assert.strictEqual(data.sandboxes[0].provider, null);
+    } finally {
+      ctx.cleanup();
+    }
+  });
+});
+
+describe("status --json", () => {
+  it("outputs valid JSON for global status", () => {
+    const ctx = makeSandboxHome();
+    try {
+      const r = runCli(["status", "--json"], { HOME: ctx.home });
+      assert.equal(r.code, 0);
+      const data = JSON.parse(r.stdout);
+      assert.equal(data.sandboxes.length, 1);
+      assert.equal(data.sandboxes[0].name, "test-sb");
+      assert.equal(data.defaultSandbox, "test-sb");
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("global status --json skips service status script", () => {
+    const ctx = makeSandboxHome();
+    try {
+      const r = runCli(["status", "--json"], { HOME: ctx.home });
+      // Should succeed because --json bypasses the start-services.sh call
+      assert.equal(r.code, 0);
+      assert.ok(!r.stderr.includes("start-services"), "should not invoke start-services.sh");
+    } finally {
+      ctx.cleanup();
+    }
+  });
+});
+
+describe("sandbox status --json", () => {
+  it("outputs valid JSON for sandbox-scoped status", () => {
+    const ctx = makeSandboxHome();
+    try {
+      const r = runCli([ctx.sandboxName, "status", "--json"], { HOME: ctx.home });
+      assert.equal(r.code, 0);
+      const data = JSON.parse(r.stdout);
+      assert.equal(data.name, "test-sb");
+      assert.equal(data.model, "nemotron-mini");
+      assert.equal(data.provider, "ollama-local");
+      assert.equal(data.gpuEnabled, false);
+      assert.deepEqual(data.policies, ["base"]);
+      assert.equal(typeof data.nim, "object");
+      assert.equal(typeof data.nim.running, "boolean");
+      assert.equal(typeof data.nim.healthy, "boolean");
+      assert.equal(data.nim.port, 8000);
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("sandbox status --json skips openshell call", () => {
+    const ctx = makeSandboxHome();
+    try {
+      const r = runCli([ctx.sandboxName, "status", "--json"], { HOME: ctx.home });
+      // Should succeed because --json bypasses the openshell sandbox get call
+      assert.equal(r.code, 0);
+      assert.ok(!r.stderr.includes("openshell"), "should not invoke openshell");
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("sandbox status --json with custom NIM port", () => {
+    const ctx = makeSandboxHome({ nimPort: 9000 });
+    try {
+      const r = runCli([ctx.sandboxName, "status", "--json"], { HOME: ctx.home });
+      assert.equal(r.code, 0);
+      const data = JSON.parse(r.stdout);
+      assert.equal(data.nim.port, 9000);
+    } finally {
+      ctx.cleanup();
+    }
+  });
+});
+
+describe("--json flag is stripped from args", () => {
+  it("--json before command works", () => {
+    const ctx = makeSandboxHome();
+    try {
+      const r = runCli(["--json", "list"], { HOME: ctx.home });
+      assert.equal(r.code, 0);
+      JSON.parse(r.stdout); // should be valid JSON
+    } finally {
+      ctx.cleanup();
+    }
+  });
+
+  it("help mentions --json", () => {
+    const r = runCli(["help"]);
+    assert.ok(r.stdout.includes("--json"), "help should mention --json flag");
+  });
+});

@@ -251,9 +251,26 @@ function uninstall(args) {
   exitWithSpawnResult(result);
 }
 
-function showStatus() {
+function showStatus({ json = false } = {}) {
   // Show sandbox registry
   const { sandboxes, defaultSandbox } = registry.listSandboxes();
+
+  if (json) {
+    const data = {
+      sandboxes: sandboxes.map((sb) => ({
+        name: sb.name,
+        default: sb.name === defaultSandbox,
+        model: sb.model || null,
+        provider: sb.provider || null,
+        gpuEnabled: !!sb.gpuEnabled,
+        policies: sb.policies || [],
+      })),
+      defaultSandbox: defaultSandbox || null,
+    };
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+
   if (sandboxes.length > 0) {
     console.log("");
     console.log("  Sandboxes:");
@@ -269,8 +286,25 @@ function showStatus() {
   run(`bash "${SCRIPTS}/start-services.sh" --status`);
 }
 
-function listSandboxes() {
+function listSandboxes({ json = false } = {}) {
   const { sandboxes, defaultSandbox } = registry.listSandboxes();
+
+  if (json) {
+    const data = {
+      sandboxes: sandboxes.map((sb) => ({
+        name: sb.name,
+        default: sb.name === defaultSandbox,
+        model: sb.model || null,
+        provider: sb.provider || null,
+        gpuEnabled: !!sb.gpuEnabled,
+        policies: sb.policies || [],
+      })),
+      defaultSandbox: defaultSandbox || null,
+    };
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+
   if (sandboxes.length === 0) {
     console.log("");
     console.log("  No sandboxes registered. Run `nemoclaw onboard` to get started.");
@@ -303,8 +337,31 @@ function sandboxConnect(sandboxName) {
   runInteractive(`openshell sandbox connect ${qn}`);
 }
 
-function sandboxStatus(sandboxName) {
+function sandboxStatus(sandboxName, { json = false } = {}) {
   const sb = registry.getSandbox(sandboxName);
+
+  // NIM health — use stored port from registry (falls back to 8000)
+  const nimPort = sb ? sb.nimPort : undefined;
+  const nimStat = nim.nimStatus(sandboxName, nimPort);
+
+  if (json) {
+    const data = {
+      name: sandboxName,
+      model: sb ? sb.model || null : null,
+      provider: sb ? sb.provider || null : null,
+      gpuEnabled: sb ? !!sb.gpuEnabled : false,
+      policies: sb ? sb.policies || [] : [],
+      nim: {
+        running: nimStat.running,
+        healthy: nimStat.healthy || false,
+        container: nimStat.container || null,
+        port: Number(nimPort) || 8000,
+      },
+    };
+    console.log(JSON.stringify(data, null, 2));
+    return;
+  }
+
   if (sb) {
     console.log("");
     console.log(`  Sandbox: ${sb.name}`);
@@ -317,9 +374,6 @@ function sandboxStatus(sandboxName) {
   // openshell info
   run(`openshell sandbox get ${shellQuote(sandboxName)} 2>/dev/null || true`, { ignoreError: true });
 
-  // NIM health — use stored port from registry (falls back to 8000)
-  const nimPort = sb ? sb.nimPort : undefined;
-  const nimStat = nim.nimStatus(sandboxName, nimPort);
   console.log(`    NIM:      ${nimStat.running ? `running (${nimStat.container})` : "not running"}`);
   if (nimStat.running) {
     console.log(`    Healthy:  ${nimStat.healthy ? "yes" : "no"}`);
@@ -527,9 +581,9 @@ function help() {
     nemoclaw setup-spark             Set up on DGX Spark ${D}(fixes cgroup v2 + Docker)${R}
 
   ${G}Sandbox Management:${R}
-    ${B}nemoclaw list${R}                    List all sandboxes
+    ${B}nemoclaw list${R}                    List all sandboxes ${D}(--json for machine output)${R}
     nemoclaw <name> connect          Shell into a running sandbox
-    nemoclaw <name> status           Sandbox health + NIM status
+    nemoclaw <name> status           Sandbox health + NIM status ${D}(--json)${R}
     nemoclaw <name> logs ${D}[--follow]${R}  Stream sandbox logs
     nemoclaw <name> destroy          Stop NIM + delete sandbox ${D}(--yes to skip prompt)${R}
 
@@ -543,7 +597,7 @@ function help() {
   ${G}Services:${R}
     nemoclaw start                   Start auxiliary services ${D}(Telegram, tunnel)${R}
     nemoclaw stop                    Stop all services
-    nemoclaw status                  Show sandbox list and service status
+    nemoclaw status                  Show sandbox list and service status ${D}(--json)${R}
 
   Troubleshooting:
     nemoclaw reconnect               Repair gateway/sandbox connectivity ${D}(#716)${R}
@@ -572,12 +626,17 @@ function help() {
 
 // ── Dispatch ─────────────────────────────────────────────────────
 
-// Strip --verbose / --debug before dispatch so commands don't see them.
+// Strip --verbose / --debug / --json before dispatch so commands don't see them.
 const VERBOSE_FLAGS = new Set(["--verbose", "--debug"]);
 const rawArgs = process.argv.slice(2);
+let _jsonOutput = false;
 const filteredArgs = rawArgs.filter((a) => {
   if (VERBOSE_FLAGS.has(a)) {
     setVerbose(true);
+    return false;
+  }
+  if (a === "--json") {
+    _jsonOutput = true;
     return false;
   }
   return true;
@@ -607,12 +666,12 @@ if (isVerbose()) {
       case "deploy":      await deploy(args[0]); break;
       case "start":       await start(); break;
       case "stop":        stop(); break;
-      case "status":      showStatus(); break;
+      case "status":      showStatus({ json: _jsonOutput }); break;
       case "debug":       debug(args); break;
       case "uninstall":   uninstall(args); break;
       case "update":      await update(args); break;
       case "reconnect":   reconnectCmd(args); break;
-      case "list":        listSandboxes(); break;
+      case "list":        listSandboxes({ json: _jsonOutput }); break;
       case "--version":
       case "-v": {
         const pkg = require(path.join(__dirname, "..", "package.json"));
@@ -633,7 +692,7 @@ if (isVerbose()) {
 
     switch (action) {
       case "connect":     sandboxConnect(cmd); break;
-      case "status":      sandboxStatus(cmd); break;
+      case "status":      sandboxStatus(cmd, { json: _jsonOutput }); break;
       case "logs":        sandboxLogs(cmd, actionArgs.includes("--follow")); break;
       case "policy-add":  await sandboxPolicyAdd(cmd); break;
       case "policy-list": sandboxPolicyList(cmd); break;
