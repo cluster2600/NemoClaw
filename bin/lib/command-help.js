@@ -187,6 +187,21 @@ const SANDBOX_HELP = {
     related: ["status", "connect"],
   },
 
+  model: {
+    purpose: "View or change the active inference model for a sandbox.",
+    usage: "nemoclaw <name> model [list | set <model-id>]",
+    options: [
+      ["list", "List available models for the sandbox's provider"],
+      ["set <model-id>", "Switch inference routing to a different model"],
+    ],
+    examples: [
+      "nemoclaw my-sandbox model",
+      "nemoclaw my-sandbox model list",
+      "nemoclaw my-sandbox model set moonshotai/kimi-k2.5",
+    ],
+    related: ["status", "connect"],
+  },
+
   "policy-add": {
     purpose: "Interactively add a network or filesystem policy preset to a sandbox.",
     usage: "nemoclaw <name> policy-add",

@@ -32,6 +32,7 @@ const {
 const registry = require("./lib/registry");
 const nim = require("./lib/nim");
 const policies = require("./lib/policies");
+const model = require("./lib/model");
 const { handleHelpFlag } = require("./lib/command-help");
 
 // ── Global commands ──────────────────────────────────────────────
@@ -412,6 +413,70 @@ async function sandboxPolicyAdd(sandboxName) {
   policies.applyPreset(sandboxName, answer);
 }
 
+function sandboxModel(sandboxName, actionArgs) {
+  const subCmd = actionArgs[0];
+
+  if (subCmd === "list") {
+    const { provider } = model.getCurrentModel(sandboxName);
+    if (!provider) {
+      console.error(`  Sandbox '${sandboxName}' has no provider configured.`);
+      process.exit(1);
+    }
+    const { models: available, source } = model.listAvailableModels(provider);
+    const { model: current } = model.getCurrentModel(sandboxName);
+
+    console.log("");
+    console.log(`  Available models (${source}):`);
+    for (const m of available) {
+      const marker = current && (m.id === current) ? "●" : "○";
+      console.log(`    ${marker} ${m.id}${m.label !== m.id ? ` — ${m.label}` : ""}`);
+    }
+    console.log("");
+    return;
+  }
+
+  if (subCmd === "set") {
+    const modelId = actionArgs[1];
+    if (!modelId) {
+      console.error("  Usage: nemoclaw <name> model set <model-id>");
+      console.error("");
+      console.error("  List available models with: nemoclaw <name> model list");
+      process.exit(1);
+    }
+
+    const { model: current } = model.getCurrentModel(sandboxName);
+    if (current === modelId) {
+      console.log(`  ${G}✓${R} Already using model '${modelId}'.`);
+      return;
+    }
+
+    console.log(`  Switching model from '${current || "unknown"}' to '${modelId}'...`);
+    const result = model.setModel(sandboxName, modelId);
+    if (result.success) {
+      console.log(`  ${G}✓${R} Model changed to '${modelId}'.`);
+      console.log("");
+      console.log(`  ${D}The gateway now routes inference requests to this model.${R}`);
+      console.log(`  ${D}The sandbox openclaw.json is unchanged (immutable by design).${R}`);
+    } else {
+      console.error(`  ${RD}✗${R} ${result.error}`);
+      process.exit(1);
+    }
+    return;
+  }
+
+  // Default: show current model
+  const { model: current, provider } = model.getCurrentModel(sandboxName);
+  console.log("");
+  console.log(`  Sandbox:  ${sandboxName}`);
+  console.log(`  Model:    ${current || "unknown"}`);
+  console.log(`  Provider: ${provider || "unknown"}`);
+  console.log("");
+  console.log(`  Commands:`);
+  console.log(`    nemoclaw ${sandboxName} model list          List available models`);
+  console.log(`    nemoclaw ${sandboxName} model set <model>   Switch to a different model`);
+  console.log("");
+}
+
 function sandboxPolicyList(sandboxName) {
   const allPresets = policies.listPresets();
   const applied = policies.getAppliedPresets(sandboxName);
@@ -588,6 +653,11 @@ function help() {
     nemoclaw <name> logs ${D}[--follow]${R}  Stream sandbox logs
     nemoclaw <name> destroy          Stop NIM + delete sandbox ${D}(--yes to skip prompt)${R}
 
+  ${G}Model Management:${R}
+    nemoclaw <name> model            Show current model and provider
+    nemoclaw <name> model list       List available models ${D}(● = active)${R}
+    nemoclaw <name> model set <id>   Switch to a different model
+
   ${G}Policy Presets:${R}
     nemoclaw <name> policy-add       Add a network or filesystem policy preset
     nemoclaw <name> policy-list      List presets ${D}(● = applied)${R}
@@ -701,12 +771,13 @@ if (isVerbose()) {
       case "connect":     sandboxConnect(cmd); break;
       case "status":      sandboxStatus(cmd, { json: _jsonOutput }); break;
       case "logs":        sandboxLogs(cmd, actionArgs.includes("--follow")); break;
+      case "model":       sandboxModel(cmd, actionArgs); break;
       case "policy-add":  await sandboxPolicyAdd(cmd); break;
       case "policy-list": sandboxPolicyList(cmd); break;
       case "destroy":     await sandboxDestroy(cmd, actionArgs); break;
       default:
         console.error(`  Unknown action: ${action}`);
-        console.error(`  Valid actions: connect, status, logs, policy-add, policy-list, destroy`);
+        console.error(`  Valid actions: connect, status, logs, model, policy-add, policy-list, destroy`);
         process.exit(1);
     }
     return;
