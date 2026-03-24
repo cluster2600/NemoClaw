@@ -1,0 +1,34 @@
+# SPDX-FileCopyrightText: Copyright (c) 2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-License-Identifier: Apache-2.0
+#
+# Enables outbound calls for the agent-safety plugin:
+#   - Anthropic API (api.anthropic.com) for Claude-based action validation
+#     in api/both mode
+#   - Telegram API (api.telegram.org) for the owner approval flow
+
+preset:
+  name: agent-safety
+  description: "agent-safety plugin outbound access (Claude validation + Telegram approval)"
+
+network_policies:
+  agent_safety_anthropic:
+    name: agent_safety_anthropic
+    endpoints:
+      - host: api.anthropic.com
+        port: 443
+        protocol: rest
+        access: full
+    binaries:
+      - { path: /usr/local/bin/node* }
+      - { path: /usr/bin/node* }
+
+  agent_safety_telegram:
+    name: agent_safety_telegram
+    endpoints:
+      - host: api.telegram.org
+        port: 443
+        protocol: rest
+        access: full
+    binaries:
+      - { path: /usr/local/bin/node* }
+      - { path: /usr/bin/node* }

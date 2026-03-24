@@ -7,9 +7,9 @@ import policies from "../bin/lib/policies";
 
 describe("policies", () => {
   describe("listPresets", () => {
-    it("returns all 9 presets", () => {
+    it("returns all 10 presets", () => {
       const presets = policies.listPresets();
-      expect(presets.length).toBe(9);
+      expect(presets.length).toBe(10);
     });
 
     it("each preset has name and description", () => {
@@ -21,7 +21,7 @@ describe("policies", () => {
 
     it("returns expected preset names", () => {
       const names = policies.listPresets().map((p) => p.name).sort();
-      const expected = ["discord", "docker", "huggingface", "jira", "npm", "outlook", "pypi", "slack", "telegram"];
+      const expected = ["agent-safety", "discord", "docker", "huggingface", "jira", "npm", "outlook", "pypi", "slack", "telegram"];
       expect(names).toEqual(expected);
     });
   });
@@ -118,6 +118,15 @@ describe("policies", () => {
         const content = policies.loadPreset(p.name);
         expect(content.includes("network_policies:")).toBeTruthy();
       }
+    });
+
+    it("agent-safety preset has network_policies for Anthropic and Telegram", () => {
+      const content = policies.loadPreset("agent-safety");
+      expect(content).toBeTruthy();
+      expect(content.includes("network_policies:")).toBe(true);
+      const hosts = policies.getPresetEndpoints(content);
+      expect(hosts).toContain("api.anthropic.com");
+      expect(hosts).toContain("api.telegram.org");
     });
 
     it("package-manager presets use access: full (not tls: terminate)", () => {
