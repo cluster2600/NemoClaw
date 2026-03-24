@@ -530,11 +530,16 @@ describe("regression guards", () => {
       expect(src).toContain("openshell-checksums-sha256.txt");
       expect(src).toContain("shasum -a 256 -c");
     });
+
+    it("telegram bridge validates SANDBOX_NAME on startup", () => {
+      const fs = require("fs");
+      const src = fs.readFileSync(path.join(import.meta.dirname, "..", "scripts", "telegram-bridge.js"), "utf-8");
+      expect(src.includes("validateName(SANDBOX")).toBeTruthy();
+      expect(src.includes("execSync")).toBe(false);
+    });
   });
 
   describe("curl-pipe-to-shell guards (#574, #583)", () => {
-    // Strip comment lines, then join line continuations so multiline
-    // curl ... |\n  bash patterns are caught by the single-line regex.
     const stripComments = (src, commentPrefix) =>
       src
         .split("\n")
