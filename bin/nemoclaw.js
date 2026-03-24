@@ -46,14 +46,15 @@ const GLOBAL_COMMANDS = new Set([
 
 const REMOTE_UNINSTALL_URL = "https://raw.githubusercontent.com/NVIDIA/NemoClaw/refs/heads/main/uninstall.sh";
 
-function resolveUninstallScript() {
+function resolveUninstallScript(deps = {}) {
+  const { existsSync = fs.existsSync } = deps;
   const candidates = [
     path.join(ROOT, "uninstall.sh"),
     path.join(__dirname, "..", "uninstall.sh"),
   ];
 
   for (const candidate of candidates) {
-    if (fs.existsSync(candidate)) {
+    if (existsSync(candidate)) {
       return candidate;
     }
   }
@@ -61,17 +62,20 @@ function resolveUninstallScript() {
   return null;
 }
 
-function exitWithSpawnResult(result) {
+function exitWithSpawnResult(result, deps = {}) {
+  const { exit = process.exit.bind(process), signals = os.constants.signals } = deps;
   if (result.status !== null) {
-    process.exit(result.status);
+    exit(result.status);
+    return;
   }
 
   if (result.signal) {
-    const signalNumber = os.constants.signals[result.signal];
-    process.exit(signalNumber ? 128 + signalNumber : 1);
+    const signalNumber = signals[result.signal];
+    exit(signalNumber ? 128 + signalNumber : 1);
+    return;
   }
 
-  process.exit(1);
+  exit(1);
 }
 
 // ── Commands ─────────────────────────────────────────────────────
@@ -91,21 +95,34 @@ async function onboard(args) {
   await runOnboard({ nonInteractive });
 }
 
-async function setup() {
-  console.log("");
-  console.log("  ⚠  `nemoclaw setup` is deprecated. Use `nemoclaw onboard` instead.");
-  console.log("     Running legacy setup.sh for backwards compatibility...");
-  console.log("");
-  await ensureApiKey();
-  const { defaultSandbox } = registry.listSandboxes();
+async function setup(deps = {}) {
+  const {
+    ensureApiKey: _ensureApiKey = ensureApiKey,
+    listSandboxes: _listSandboxes = registry.listSandboxes.bind(registry),
+    run: _run = run,
+    log = console.log.bind(console),
+  } = deps;
+
+  log("");
+  log("  ⚠  `nemoclaw setup` is deprecated. Use `nemoclaw onboard` instead.");
+  log("     Running legacy setup.sh for backwards compatibility...");
+  log("");
+  await _ensureApiKey();
+  const { defaultSandbox } = _listSandboxes();
   const safeName = defaultSandbox && /^[a-z0-9][a-z0-9-]*[a-z0-9]$/.test(defaultSandbox) ? defaultSandbox : "";
-  run(`bash "${SCRIPTS}/setup.sh" ${shellQuote(safeName)}`);
+  _run(`bash "${SCRIPTS}/setup.sh" ${shellQuote(safeName)}`);
 }
 
-async function setupSpark() {
-  await ensureApiKey();
-  run(`sudo -E bash "${SCRIPTS}/setup-spark.sh"`, {
-    env: buildCredentialEnv(["NVIDIA_API_KEY"]),
+async function setupSpark(deps = {}) {
+  const {
+    ensureApiKey: _ensureApiKey = ensureApiKey,
+    buildCredentialEnv: _buildCredentialEnv = buildCredentialEnv,
+    run: _run = run,
+  } = deps;
+
+  await _ensureApiKey();
+  _run(`sudo -E bash "${SCRIPTS}/setup-spark.sh"`, {
+    env: _buildCredentialEnv(["NVIDIA_API_KEY"]),
   });
 }
 
@@ -211,58 +228,85 @@ async function deploy(instanceName) {
   runInteractive(`ssh -t -o StrictHostKeyChecking=no -o LogLevel=ERROR ${qname} 'cd /home/ubuntu/nemoclaw && set -a && . .env && set +a && openshell sandbox connect nemoclaw'`);
 }
 
-async function start() {
-  await ensureApiKey();
-  const { defaultSandbox } = registry.listSandboxes();
+async function start(deps = {}) {
+  const {
+    ensureApiKey: _ensureApiKey = ensureApiKey,
+    listSandboxes: _listSandboxes = registry.listSandboxes.bind(registry),
+    run: _run = run,
+  } = deps;
+
+  await _ensureApiKey();
+  const { defaultSandbox } = _listSandboxes();
   const safeName = defaultSandbox && /^[a-zA-Z0-9._-]+$/.test(defaultSandbox) ? defaultSandbox : null;
   const sandboxEnv = safeName ? `SANDBOX_NAME=${shellQuote(safeName)}` : "";
-  run(`${sandboxEnv} bash "${SCRIPTS}/start-services.sh"`);
+  _run(`${sandboxEnv} bash "${SCRIPTS}/start-services.sh"`);
 }
 
-function stop() {
-  run(`bash "${SCRIPTS}/start-services.sh" --stop`);
+function stop(deps = {}) {
+  const { run: _run = run } = deps;
+  _run(`bash "${SCRIPTS}/start-services.sh" --stop`);
 }
 
-function debug(args) {
-  const result = spawnSync("bash", [path.join(SCRIPTS, "debug.sh"), ...args], {
+function debug(args, deps = {}) {
+  const {
+    spawn = spawnSync,
+    exitSpawn = exitWithSpawnResult,
+    listSandboxes: _listSandboxes = registry.listSandboxes.bind(registry),
+  } = deps;
+
+  const result = spawn("bash", [path.join(SCRIPTS, "debug.sh"), ...args], {
     stdio: "inherit",
     cwd: ROOT,
     env: {
       ...process.env,
-      SANDBOX_NAME: registry.listSandboxes().defaultSandbox || "",
+      SANDBOX_NAME: _listSandboxes().defaultSandbox || "",
     },
   });
-  exitWithSpawnResult(result);
+  exitSpawn(result);
 }
 
-function uninstall(args) {
-  const localScript = resolveUninstallScript();
+function uninstall(args, deps = {}) {
+  const {
+    resolve = resolveUninstallScript,
+    spawn = spawnSync,
+    exitSpawn = exitWithSpawnResult,
+    log = console.log.bind(console),
+  } = deps;
+
+  const localScript = resolve();
   if (localScript) {
-    console.log(`  Running local uninstall script: ${localScript}`);
-    const result = spawnSync("bash", [localScript, ...args], {
+    log(`  Running local uninstall script: ${localScript}`);
+    const result = spawn("bash", [localScript, ...args], {
       stdio: "inherit",
       cwd: ROOT,
       env: process.env,
     });
-    exitWithSpawnResult(result);
+    exitSpawn(result);
+    return;
   }
 
-  console.log(`  Local uninstall script not found; falling back to ${REMOTE_UNINSTALL_URL}`);
+  log(`  Local uninstall script not found; falling back to ${REMOTE_UNINSTALL_URL}`);
   const forwardedArgs = args.map(shellQuote).join(" ");
   const command = forwardedArgs.length > 0
     ? `curl -fsSL ${shellQuote(REMOTE_UNINSTALL_URL)} | bash -s -- ${forwardedArgs}`
     : `curl -fsSL ${shellQuote(REMOTE_UNINSTALL_URL)} | bash`;
-  const result = spawnSync("bash", ["-c", command], {
+  const result = spawn("bash", ["-c", command], {
     stdio: "inherit",
     cwd: ROOT,
     env: process.env,
   });
-  exitWithSpawnResult(result);
+  exitSpawn(result);
 }
 
-function showStatus({ json = false } = {}) {
+function showStatus({ json = false, deps = {} } = {}) {
+  const {
+    listSandboxes: _listSandboxes = registry.listSandboxes.bind(registry),
+    run: _run = run,
+    log = console.log.bind(console),
+  } = deps;
+
   // Show sandbox registry
-  const { sandboxes, defaultSandbox } = registry.listSandboxes();
+  const { sandboxes, defaultSandbox } = _listSandboxes();
 
   if (json) {
     const data = {
@@ -276,23 +320,23 @@ function showStatus({ json = false } = {}) {
       })),
       defaultSandbox: defaultSandbox || null,
     };
-    console.log(JSON.stringify(data, null, 2));
+    log(JSON.stringify(data, null, 2));
     return;
   }
 
   if (sandboxes.length > 0) {
-    console.log("");
-    console.log("  Sandboxes:");
+    log("");
+    log("  Sandboxes:");
     for (const sb of sandboxes) {
       const def = sb.name === defaultSandbox ? " *" : "";
       const model = sb.model ? ` (${sb.model})` : "";
-      console.log(`    ${sb.name}${def}${model}`);
+      log(`    ${sb.name}${def}${model}`);
     }
-    console.log("");
+    log("");
   }
 
   // Show service status
-  run(`bash "${SCRIPTS}/start-services.sh" --status`);
+  _run(`bash "${SCRIPTS}/start-services.sh" --status`);
 }
 
 function listSandboxes({ json = false } = {}) {
@@ -346,12 +390,19 @@ function sandboxConnect(sandboxName) {
   runInteractive(`openshell sandbox connect ${qn}`);
 }
 
-function sandboxStatus(sandboxName, { json = false } = {}) {
-  const sb = registry.getSandbox(sandboxName);
+function sandboxStatus(sandboxName, { json = false, deps = {} } = {}) {
+  const {
+    getSandbox = registry.getSandbox.bind(registry),
+    nimStatus = nim.nimStatus,
+    run: _run = run,
+    log = console.log.bind(console),
+  } = deps;
+
+  const sb = getSandbox(sandboxName);
 
   // NIM health — use stored port from registry (falls back to 8000)
   const nimPort = sb ? sb.nimPort : undefined;
-  const nimStat = nim.nimStatus(sandboxName, nimPort);
+  const nimStat = nimStatus(sandboxName, nimPort);
 
   if (json) {
     const data = {
@@ -367,30 +418,30 @@ function sandboxStatus(sandboxName, { json = false } = {}) {
         port: Number(nimPort) || 8000,
       },
     };
-    console.log(JSON.stringify(data, null, 2));
+    log(JSON.stringify(data, null, 2));
     return;
   }
 
   if (sb) {
-    console.log("");
-    console.log(`  Sandbox: ${sb.name}`);
-    console.log(`    Model:    ${sb.model || "unknown"}`);
-    console.log(`    Provider: ${sb.provider || "unknown"}`);
-    console.log(`    GPU:      ${sb.gpuEnabled ? "yes" : "no"}`);
-    console.log(`    Policies: ${(sb.policies || []).join(", ") || "none"}`);
+    log("");
+    log(`  Sandbox: ${sb.name}`);
+    log(`    Model:    ${sb.model || "unknown"}`);
+    log(`    Provider: ${sb.provider || "unknown"}`);
+    log(`    GPU:      ${sb.gpuEnabled ? "yes" : "no"}`);
+    log(`    Policies: ${(sb.policies || []).join(", ") || "none"}`);
   }
 
   // openshell info
-  run(`openshell sandbox get ${shellQuote(sandboxName)} 2>/dev/null || true`, { ignoreError: true });
+  _run(`openshell sandbox get ${shellQuote(sandboxName)} 2>/dev/null || true`, { ignoreError: true });
 
-  console.log(`    NIM:      ${nimStat.running ? `running (${nimStat.container})` : "not running"}`);
+  log(`    NIM:      ${nimStat.running ? `running (${nimStat.container})` : "not running"}`);
   if (nimStat.running) {
-    console.log(`    Healthy:  ${nimStat.healthy ? "yes" : "no"}`);
+    log(`    Healthy:  ${nimStat.healthy ? "yes" : "no"}`);
     if (nimPort && nimPort !== 8000) {
-      console.log(`    NIM port: ${nimPort}`);
+      log(`    NIM port: ${nimPort}`);
     }
   }
-  console.log("");
+  log("");
 }
 
 function sandboxLogs(sandboxName, follow) {
@@ -420,70 +471,82 @@ async function sandboxPolicyAdd(sandboxName) {
   policies.applyPreset(sandboxName, answer);
 }
 
-function sandboxModel(sandboxName, actionArgs) {
+function sandboxModel(sandboxName, actionArgs, deps = {}) {
+  const {
+    getCurrentModel = model.getCurrentModel,
+    listAvailableModels = model.listAvailableModels,
+    setModel = model.setModel,
+    log = console.log.bind(console),
+    logError = console.error.bind(console),
+    exit = process.exit.bind(process),
+  } = deps;
+
   const subCmd = actionArgs[0];
 
   if (subCmd === "list") {
-    const { provider } = model.getCurrentModel(sandboxName);
+    const { provider } = getCurrentModel(sandboxName);
     if (!provider) {
-      console.error(`  Sandbox '${sandboxName}' has no provider configured.`);
-      console.error("");
-      console.error("  Re-run onboard to configure a provider:  nemoclaw onboard");
-      process.exit(1);
+      logError(`  Sandbox '${sandboxName}' has no provider configured.`);
+      logError("");
+      logError("  Re-run onboard to configure a provider:  nemoclaw onboard");
+      exit(1);
+      return;
     }
-    const { models: available, source } = model.listAvailableModels(provider);
-    const { model: current } = model.getCurrentModel(sandboxName);
+    const { models: available, source } = listAvailableModels(provider);
+    const { model: current } = getCurrentModel(sandboxName);
 
-    console.log("");
-    console.log(`  Available models (${source}):`);
+    log("");
+    log(`  Available models (${source}):`);
     for (const m of available) {
       const marker = current && (m.id === current) ? "●" : "○";
-      console.log(`    ${marker} ${m.id}${m.label !== m.id ? ` — ${m.label}` : ""}`);
+      log(`    ${marker} ${m.id}${m.label !== m.id ? ` — ${m.label}` : ""}`);
     }
-    console.log("");
+    log("");
     return;
   }
 
   if (subCmd === "set") {
     const modelId = actionArgs[1];
     if (!modelId) {
-      console.error("  Usage: nemoclaw <name> model set <model-id>");
-      console.error("");
-      console.error("  List available models with: nemoclaw <name> model list");
-      process.exit(1);
-    }
-
-    const { model: current } = model.getCurrentModel(sandboxName);
-    if (current === modelId) {
-      console.log(`  ${G}✓${R} Already using model '${modelId}'.`);
+      logError("  Usage: nemoclaw <name> model set <model-id>");
+      logError("");
+      logError("  List available models with: nemoclaw <name> model list");
+      exit(1);
       return;
     }
 
-    console.log(`  Switching model from '${current || "unknown"}' to '${modelId}'...`);
-    const result = model.setModel(sandboxName, modelId);
+    const { model: current } = getCurrentModel(sandboxName);
+    if (current === modelId) {
+      log(`  ${G}✓${R} Already using model '${modelId}'.`);
+      return;
+    }
+
+    log(`  Switching model from '${current || "unknown"}' to '${modelId}'...`);
+    const result = setModel(sandboxName, modelId);
     if (result.success) {
-      console.log(`  ${G}✓${R} Model changed to '${modelId}'.`);
-      console.log("");
-      console.log(`  ${D}The gateway now routes inference requests to this model.${R}`);
-      console.log(`  ${D}The sandbox openclaw.json is unchanged (immutable by design).${R}`);
+      log(`  ${G}✓${R} Model changed to '${modelId}'.`);
+      log("");
+      log(`  ${D}The gateway now routes inference requests to this model.${R}`);
+      log(`  ${D}The sandbox openclaw.json is unchanged (immutable by design).${R}`);
     } else {
-      console.error(`  ${RD}✗${R} ${result.error}`);
-      process.exit(1);
+      logError(`  ${RD}✗${R} ${result.error}`);
+      exit(1);
+      return;
     }
     return;
   }
 
   // Default: show current model
-  const { model: current, provider } = model.getCurrentModel(sandboxName);
-  console.log("");
-  console.log(`  Sandbox:  ${sandboxName}`);
-  console.log(`  Model:    ${current || "unknown"}`);
-  console.log(`  Provider: ${provider || "unknown"}`);
-  console.log("");
-  console.log(`  Commands:`);
-  console.log(`    nemoclaw ${sandboxName} model list          List available models`);
-  console.log(`    nemoclaw ${sandboxName} model set <model>   Switch to a different model`);
-  console.log("");
+  const { model: current, provider } = getCurrentModel(sandboxName);
+  log("");
+  log(`  Sandbox:  ${sandboxName}`);
+  log(`  Model:    ${current || "unknown"}`);
+  log(`  Provider: ${provider || "unknown"}`);
+  log("");
+  log(`  Commands:`);
+  log(`    nemoclaw ${sandboxName} model list          List available models`);
+  log(`    nemoclaw ${sandboxName} model set <model>   Switch to a different model`);
+  log("");
 }
 
 function sandboxPolicyList(sandboxName) {
@@ -524,65 +587,79 @@ async function sandboxDestroy(sandboxName, args = []) {
 
 // ── Reconnect ─────────────────────────────────────────────────────
 
-function reconnectCmd(args) {
-  const { reconnect, diagnose } = require("./lib/reconnect");
+function reconnectCmd(args, deps = {}) {
+  const reconnectLib = require("./lib/reconnect");
+  const {
+    reconnect: _reconnect = reconnectLib.reconnect,
+    diagnose: _diagnose = reconnectLib.diagnose,
+    getDefault = registry.getDefault.bind(registry),
+    log = console.log.bind(console),
+    logError = console.error.bind(console),
+    exit = process.exit.bind(process),
+  } = deps;
 
-  const sandboxName = args[0] || registry.getDefault();
+  const sandboxName = args[0] || getDefault();
   if (!sandboxName) {
-    console.error("  No sandbox registered. Run `nemoclaw onboard` first.");
-    process.exit(1);
+    logError("  No sandbox registered. Run `nemoclaw onboard` first.");
+    exit(1);
+    return;
   }
 
   const diagOnly = args.includes("--diagnose");
 
   if (diagOnly) {
-    const diag = diagnose(sandboxName);
-    console.log("");
-    console.log(`  ${B}Diagnostics for sandbox '${sandboxName}':${R}`);
-    console.log(`    Gateway running: ${diag.gateway.running ? `${G}yes${R}` : `${RD}no${R}`}`);
-    console.log(`    Gateway healthy: ${diag.gateway.healthy ? `${G}yes${R}` : `${RD}no${R}`}`);
-    console.log(`    Sandbox exists:  ${diag.sandbox.exists ? `${G}yes${R}` : `${RD}no${R}`}`);
-    console.log(`    Sandbox ready:   ${diag.sandbox.ready ? `${G}yes${R}` : `${RD}no${R}`}`);
-    console.log(`    WSL2:            ${diag.wsl ? "yes" : "no"}`);
-    console.log(`    Runtime:         ${diag.runtime}`);
-    console.log("");
+    const diag = _diagnose(sandboxName);
+    log("");
+    log(`  ${B}Diagnostics for sandbox '${sandboxName}':${R}`);
+    log(`    Gateway running: ${diag.gateway.running ? `${G}yes${R}` : `${RD}no${R}`}`);
+    log(`    Gateway healthy: ${diag.gateway.healthy ? `${G}yes${R}` : `${RD}no${R}`}`);
+    log(`    Sandbox exists:  ${diag.sandbox.exists ? `${G}yes${R}` : `${RD}no${R}`}`);
+    log(`    Sandbox ready:   ${diag.sandbox.ready ? `${G}yes${R}` : `${RD}no${R}`}`);
+    log(`    WSL2:            ${diag.wsl ? "yes" : "no"}`);
+    log(`    Runtime:         ${diag.runtime}`);
+    log("");
     return;
   }
 
-  console.log("");
-  console.log(`  Reconnecting sandbox '${sandboxName}'...`);
-  console.log("");
+  log("");
+  log(`  Reconnecting sandbox '${sandboxName}'...`);
+  log("");
 
-  const result = reconnect(sandboxName);
+  const result = _reconnect(sandboxName);
 
   for (const step of result.steps) {
-    console.log(`  ${result.success ? G : ""}✓${R} ${step}`);
+    log(`  ${result.success ? G : ""}✓${R} ${step}`);
   }
 
   if (!result.success) {
     for (const err of result.errors) {
-      console.error(`  ${RD}✗${R} ${err}`);
+      logError(`  ${RD}✗${R} ${err}`);
     }
-    console.error("");
-    console.error("  If this persists, try: nemoclaw onboard");
-    process.exit(1);
+    logError("");
+    logError("  If this persists, try: nemoclaw onboard");
+    exit(1);
+    return;
   }
 
-  console.log("");
-  console.log(`  ${G}✓${R} Reconnected successfully. Try: nemoclaw ${sandboxName} connect`);
-  console.log("");
+  log("");
+  log(`  ${G}✓${R} Reconnected successfully. Try: nemoclaw ${sandboxName} connect`);
+  log("");
 }
 
 // ── Update ────────────────────────────────────────────────────────
 
-async function update(args) {
+async function update(args, deps = {}) {
+  const updateLib = require("./lib/update");
   const {
-    detectInstallType,
-    checkForUpdate,
-    updateSource,
-    updateGlobal,
-    verifyUpdate,
-  } = require("./lib/update");
+    detectInstallType = updateLib.detectInstallType,
+    checkForUpdate = updateLib.checkForUpdate,
+    updateSource = updateLib.updateSource,
+    updateGlobal = updateLib.updateGlobal,
+    verifyUpdate = updateLib.verifyUpdate,
+    log = console.log.bind(console),
+    logError = console.error.bind(console),
+    exit = process.exit.bind(process),
+  } = deps;
 
   const checkOnly = args.includes("--check");
 
@@ -590,35 +667,37 @@ async function update(args) {
   logDebug("update: install type=%s sourceDir=%s", install.type, install.sourceDir);
 
   if (install.type === "unknown") {
-    console.error("  Could not detect NemoClaw installation type.");
-    console.error("  Re-install with:  curl -fsSL https://raw.githubusercontent.com/NVIDIA/NemoClaw/main/install.sh | bash");
-    process.exit(1);
+    logError("  Could not detect NemoClaw installation type.");
+    logError("  Re-install with:  curl -fsSL https://raw.githubusercontent.com/NVIDIA/NemoClaw/main/install.sh | bash");
+    exit(1);
+    return;
   }
 
-  console.log(`  Installation: ${install.type === "source" ? `source checkout (${install.sourceDir})` : "global npm"}`);
+  log(`  Installation: ${install.type === "source" ? `source checkout (${install.sourceDir})` : "global npm"}`);
 
   const status = checkForUpdate(install);
   if (status.error) {
-    console.error(`  ${status.error}`);
-    process.exit(1);
+    logError(`  ${status.error}`);
+    exit(1);
+    return;
   }
 
-  console.log(`  Current version: v${status.currentVersion}${status.current ? ` (${status.current})` : ""}`);
-  console.log(`  Latest commit:   ${status.remote}`);
+  log(`  Current version: v${status.currentVersion}${status.current ? ` (${status.current})` : ""}`);
+  log(`  Latest commit:   ${status.remote}`);
 
   if (!status.updateAvailable) {
-    console.log(`  ${G}✓${R} Already up to date.`);
+    log(`  ${G}✓${R} Already up to date.`);
     return;
   }
 
   if (checkOnly) {
-    console.log(`  ${YW}Update available.${R}  Run ${B}nemoclaw update${R} to install.`);
+    log(`  ${YW}Update available.${R}  Run ${B}nemoclaw update${R} to install.`);
     return;
   }
 
-  console.log("");
-  console.log("  Updating NemoClaw...");
-  console.log("");
+  log("");
+  log("  Updating NemoClaw...");
+  log("");
 
   let ok;
   if (install.type === "source") {
@@ -628,18 +707,19 @@ async function update(args) {
   }
 
   if (!ok) {
-    console.error("");
-    console.error("  Update failed. You can re-install manually:");
-    console.error("    curl -fsSL https://raw.githubusercontent.com/NVIDIA/NemoClaw/main/install.sh | bash");
-    process.exit(1);
+    logError("");
+    logError("  Update failed. You can re-install manually:");
+    logError("    curl -fsSL https://raw.githubusercontent.com/NVIDIA/NemoClaw/main/install.sh | bash");
+    exit(1);
+    return;
   }
 
   const versionStr = verifyUpdate();
-  console.log("");
+  log("");
   if (versionStr) {
-    console.log(`  ${G}✓${R} Updated successfully: ${versionStr}`);
+    log(`  ${G}✓${R} Updated successfully: ${versionStr}`);
   } else {
-    console.log(`  ${G}✓${R} Update complete. Verify with: nemoclaw --version`);
+    log(`  ${G}✓${R} Update complete. Verify with: nemoclaw --version`);
   }
 }
 
@@ -696,6 +776,27 @@ function help() {
   Credentials saved in ~/.nemoclaw/credentials.json (mode 600)${R}
   ${D}https://www.nvidia.com/nemoclaw${R}
 `);
+}
+
+// ── Exports (for unit testing with DI) ──────────────────────────
+// istanbul ignore next — guard prevents side-effects when required as module
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    resolveUninstallScript,
+    exitWithSpawnResult,
+    setup,
+    setupSpark,
+    start,
+    stop,
+    debug: debug,
+    uninstall,
+    showStatus,
+    sandboxStatus,
+    sandboxModel,
+    reconnectCmd,
+    update,
+    REMOTE_UNINSTALL_URL,
+  };
 }
 
 // ── Dispatch ─────────────────────────────────────────────────────
