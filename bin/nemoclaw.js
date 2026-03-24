@@ -38,6 +38,7 @@ const policies = require("./lib/policies");
 const GLOBAL_COMMANDS = new Set([
   "onboard", "list", "deploy", "setup", "setup-spark",
   "start", "stop", "status", "debug", "uninstall", "update",
+  "reconnect",
   "help", "--help", "-h", "--version", "-v",
 ]);
 
@@ -392,6 +393,57 @@ async function sandboxDestroy(sandboxName, args = []) {
   console.log(`  ${G}✓${R} Sandbox '${sandboxName}' destroyed`);
 }
 
+// ── Reconnect ─────────────────────────────────────────────────────
+
+function reconnectCmd(args) {
+  const { reconnect, diagnose } = require("./lib/reconnect");
+
+  const sandboxName = args[0] || registry.getDefault();
+  if (!sandboxName) {
+    console.error("  No sandbox registered. Run `nemoclaw onboard` first.");
+    process.exit(1);
+  }
+
+  const diagOnly = args.includes("--diagnose");
+
+  if (diagOnly) {
+    const diag = diagnose(sandboxName);
+    console.log("");
+    console.log(`  ${B}Diagnostics for sandbox '${sandboxName}':${R}`);
+    console.log(`    Gateway running: ${diag.gateway.running ? `${G}yes${R}` : `${RD}no${R}`}`);
+    console.log(`    Gateway healthy: ${diag.gateway.healthy ? `${G}yes${R}` : `${RD}no${R}`}`);
+    console.log(`    Sandbox exists:  ${diag.sandbox.exists ? `${G}yes${R}` : `${RD}no${R}`}`);
+    console.log(`    Sandbox ready:   ${diag.sandbox.ready ? `${G}yes${R}` : `${RD}no${R}`}`);
+    console.log(`    WSL2:            ${diag.wsl ? "yes" : "no"}`);
+    console.log(`    Runtime:         ${diag.runtime}`);
+    console.log("");
+    return;
+  }
+
+  console.log("");
+  console.log(`  Reconnecting sandbox '${sandboxName}'...`);
+  console.log("");
+
+  const result = reconnect(sandboxName);
+
+  for (const step of result.steps) {
+    console.log(`  ${result.success ? G : ""}✓${R} ${step}`);
+  }
+
+  if (!result.success) {
+    for (const err of result.errors) {
+      console.error(`  ${RD}✗${R} ${err}`);
+    }
+    console.error("");
+    console.error("  If this persists, try: nemoclaw onboard");
+    process.exit(1);
+  }
+
+  console.log("");
+  console.log(`  ${G}✓${R} Reconnected successfully. Try: nemoclaw ${sandboxName} connect`);
+  console.log("");
+}
+
 // ── Update ────────────────────────────────────────────────────────
 
 async function update(args) {
@@ -494,6 +546,8 @@ function help() {
     nemoclaw status                  Show sandbox list and service status
 
   Troubleshooting:
+    nemoclaw reconnect               Repair gateway/sandbox connectivity ${D}(#716)${R}
+    nemoclaw reconnect --diagnose    Show connectivity diagnostics without repair
     nemoclaw --verbose <command>     Show debug output ${D}(or --debug, LOG_LEVEL=debug)${R}
     nemoclaw debug [--quick]         Collect diagnostics for bug reports
     nemoclaw debug --output FILE     Save diagnostics tarball for GitHub issues
@@ -557,6 +611,7 @@ if (isVerbose()) {
       case "debug":       debug(args); break;
       case "uninstall":   uninstall(args); break;
       case "update":      await update(args); break;
+      case "reconnect":   reconnectCmd(args); break;
       case "list":        listSandboxes(); break;
       case "--version":
       case "-v": {
