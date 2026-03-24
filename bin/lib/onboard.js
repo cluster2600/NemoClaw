@@ -510,12 +510,38 @@ function patchDockerfileModel(dockerfilePath, model) {
 }
 
 /**
+ * Validate that a version string is safe for Dockerfile ARG interpolation.
+ * Allows semver-like strings: digits, letters, dots, hyphens.
+ * Rejects quotes, backticks, semicolons, spaces, and other shell/Python
+ * metacharacters that could enable build-arg injection.
+ */
+function isSafeVersion(value) {
+  return /^[A-Za-z0-9._-]+$/.test(value);
+}
+
+/**
+ * Validate that an origins list is safe for Dockerfile ARG interpolation.
+ * Allows comma-separated URLs: scheme, host, port, path characters.
+ * Rejects quotes, backticks, semicolons, and other shell/Python
+ * metacharacters that could enable build-arg injection.
+ */
+function isSafeOriginsList(value) {
+  return /^[A-Za-z0-9._:,/\s-]+$/.test(value);
+}
+
+/**
  * Patch the OPENCLAW_VERSION ARG default so users can upgrade OpenClaw
  * without editing the Dockerfile.  Set NEMOCLAW_OPENCLAW_VERSION env var.
  * Ref: https://github.com/NVIDIA/NemoClaw/issues/739
  */
 function patchDockerfileVersion(dockerfilePath, version) {
   if (!version) return;
+  if (!isSafeVersion(version)) {
+    throw new Error(
+      `Invalid NEMOCLAW_OPENCLAW_VERSION: ${version}\n` +
+      "Version may only contain letters, numbers, '.', '_', and '-'."
+    );
+  }
   let content = fs.readFileSync(dockerfilePath, "utf8");
   content = content.replace(
     /^ARG OPENCLAW_VERSION=.*/m,
@@ -532,6 +558,12 @@ function patchDockerfileVersion(dockerfilePath, version) {
  */
 function patchDockerfileExtraOrigins(dockerfilePath, extraOrigins) {
   if (!extraOrigins) return;
+  if (!isSafeOriginsList(extraOrigins)) {
+    throw new Error(
+      `Invalid NEMOCLAW_EXTRA_ORIGINS: ${extraOrigins}\n` +
+      "Origins may only contain letters, numbers, '.', '_', ':', ',', '/', and '-'."
+    );
+  }
   let content = fs.readFileSync(dockerfilePath, "utf8");
   content = content.replace(
     /^ARG NEMOCLAW_EXTRA_ORIGINS=.*/m,
@@ -1208,6 +1240,8 @@ module.exports = {
   getStableGatewayImageRef,
   hasStaleGateway,
   isSafeModelId,
+  isSafeOriginsList,
+  isSafeVersion,
   isSandboxReady,
   onboard,
   parsePolicyPresetEnv,

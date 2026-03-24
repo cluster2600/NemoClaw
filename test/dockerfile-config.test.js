@@ -8,6 +8,8 @@ const { describe, it } = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  isSafeOriginsList,
+  isSafeVersion,
   patchDockerfileVersion,
   patchDockerfileExtraOrigins,
 } = require("../bin/lib/onboard");
@@ -289,6 +291,152 @@ describe("Dockerfile config: build toolchain for native addons (#724)", () => {
     assert.ok(
       purgeIdx > lastNpmInstall,
       "build-essential purge must come after the last npm install"
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Build-arg injection prevention (security hardening)
+// ---------------------------------------------------------------------------
+
+describe("Build-arg injection prevention (security)", () => {
+  // --- isSafeVersion validation ---
+
+  it("isSafeVersion accepts valid semver-like strings", () => {
+    assert.ok(isSafeVersion("2026.3.22"));
+    assert.ok(isSafeVersion("1.0.0-rc.1"));
+    assert.ok(isSafeVersion("latest"));
+    assert.ok(isSafeVersion("2026.3.11_beta"));
+  });
+
+  it("isSafeVersion rejects single-quote injection", () => {
+    assert.ok(!isSafeVersion("1.0'; import os; os.system('rm -rf /'); '"));
+  });
+
+  it("isSafeVersion rejects backtick injection", () => {
+    assert.ok(!isSafeVersion("1.0`touch /tmp/pwned`"));
+  });
+
+  it("isSafeVersion rejects semicolon injection", () => {
+    assert.ok(!isSafeVersion("1.0; echo pwned"));
+  });
+
+  it("isSafeVersion rejects spaces", () => {
+    assert.ok(!isSafeVersion("1.0 || true"));
+  });
+
+  it("isSafeVersion rejects dollar sign", () => {
+    assert.ok(!isSafeVersion("$(whoami)"));
+  });
+
+  // --- isSafeOriginsList validation ---
+
+  it("isSafeOriginsList accepts valid comma-separated URLs", () => {
+    assert.ok(isSafeOriginsList("http://192.168.1.50:3333,http://10.0.0.5:18789"));
+    assert.ok(isSafeOriginsList("http://localhost:3000"));
+    assert.ok(isSafeOriginsList("https://my-server.local:8443"));
+  });
+
+  it("isSafeOriginsList rejects single-quote injection", () => {
+    assert.ok(!isSafeOriginsList("http://ok:3000'; import os; '"));
+  });
+
+  it("isSafeOriginsList rejects backtick injection", () => {
+    assert.ok(!isSafeOriginsList("http://ok:3000`touch /tmp/pwned`"));
+  });
+
+  it("isSafeOriginsList rejects semicolon injection", () => {
+    assert.ok(!isSafeOriginsList("http://ok:3000; echo pwned"));
+  });
+
+  it("isSafeOriginsList rejects dollar sign expansion", () => {
+    assert.ok(!isSafeOriginsList("$(whoami)"));
+  });
+
+  // --- patchDockerfileVersion throws on injection ---
+
+  it("patchDockerfileVersion throws on injection attempt", () => {
+    const { tmpDir, dockerfilePath } = writeTmpDockerfile(DOCKERFILE_TEMPLATE);
+    try {
+      assert.throws(
+        () => patchDockerfileVersion(dockerfilePath, "1.0'; import os; '"),
+        /Invalid NEMOCLAW_OPENCLAW_VERSION/
+      );
+      // Dockerfile must be unchanged
+      const content = fs.readFileSync(dockerfilePath, "utf8");
+      assert.match(content, /^ARG OPENCLAW_VERSION=2026\.3\.11$/m);
+    } finally {
+      cleanup(tmpDir);
+    }
+  });
+
+  it("patchDockerfileExtraOrigins throws on injection attempt", () => {
+    const { tmpDir, dockerfilePath } = writeTmpDockerfile(DOCKERFILE_TEMPLATE);
+    try {
+      assert.throws(
+        () => patchDockerfileExtraOrigins(dockerfilePath, "http://ok:3000'; os.system('evil'); '"),
+        /Invalid NEMOCLAW_EXTRA_ORIGINS/
+      );
+      // Dockerfile must be unchanged
+      const content = fs.readFileSync(dockerfilePath, "utf8");
+      assert.match(content, /^ARG NEMOCLAW_EXTRA_ORIGINS=$/m);
+    } finally {
+      cleanup(tmpDir);
+    }
+  });
+
+  // --- Dockerfile uses os.environ instead of shell interpolation ---
+
+  it("Dockerfile Python config reads values via os.environ, not shell interpolation", () => {
+    const repoDockerfile = path.join(__dirname, "..", "Dockerfile");
+    const content = fs.readFileSync(repoDockerfile, "utf8");
+    // Must use os.environ.get() for all three config values
+    assert.match(
+      content,
+      /os\.environ\.get\('NEMOCLAW_MODEL'/,
+      "Dockerfile must read NEMOCLAW_MODEL via os.environ.get()"
+    );
+    assert.match(
+      content,
+      /os\.environ\.get\('CHAT_UI_URL'/,
+      "Dockerfile must read CHAT_UI_URL via os.environ.get()"
+    );
+    assert.match(
+      content,
+      /os\.environ\.get\('NEMOCLAW_EXTRA_ORIGINS'/,
+      "Dockerfile must read NEMOCLAW_EXTRA_ORIGINS via os.environ.get()"
+    );
+    // Must NOT use the old vulnerable pattern: model = '${VAR}'
+    assert.doesNotMatch(
+      content,
+      /model\s*=\s*'\$\{NEMOCLAW_MODEL\}'/,
+      "Dockerfile must NOT use shell interpolation for NEMOCLAW_MODEL"
+    );
+    assert.doesNotMatch(
+      content,
+      /chat_ui_url\s*=\s*'\$\{CHAT_UI_URL\}'/,
+      "Dockerfile must NOT use shell interpolation for CHAT_UI_URL"
+    );
+  });
+
+  it("Dockerfile promotes ARGs to ENV for safe Python access", () => {
+    const repoDockerfile = path.join(__dirname, "..", "Dockerfile");
+    const content = fs.readFileSync(repoDockerfile, "utf8");
+    // ENV block must promote all three ARGs
+    assert.match(
+      content,
+      /ENV\s+NEMOCLAW_MODEL=\$\{NEMOCLAW_MODEL\}/,
+      "Dockerfile must promote NEMOCLAW_MODEL ARG to ENV"
+    );
+    assert.match(
+      content,
+      /CHAT_UI_URL=\$\{CHAT_UI_URL\}/,
+      "Dockerfile must promote CHAT_UI_URL ARG to ENV"
+    );
+    assert.match(
+      content,
+      /NEMOCLAW_EXTRA_ORIGINS=\$\{NEMOCLAW_EXTRA_ORIGINS\}/,
+      "Dockerfile must promote NEMOCLAW_EXTRA_ORIGINS ARG to ENV"
     );
   });
 });

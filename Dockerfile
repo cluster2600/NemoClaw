@@ -105,6 +105,15 @@ ARG NEMOCLAW_EXTRA_ORIGINS=
 # Pass --build-arg NEMOCLAW_BUILD_ID=$(date +%s) to bust the cache.
 ARG NEMOCLAW_BUILD_ID=default
 
+# Promote ARGs to ENV so the Python config generator reads them via
+# os.environ instead of shell interpolation inside string literals.
+# This prevents build-arg injection — a crafted value containing
+# quotes or semicolons cannot break out of the Python script.
+# Ref: security hardening for #739 build-arg handling
+ENV NEMOCLAW_MODEL=${NEMOCLAW_MODEL} \
+    CHAT_UI_URL=${CHAT_UI_URL} \
+    NEMOCLAW_EXTRA_ORIGINS=${NEMOCLAW_EXTRA_ORIGINS}
+
 WORKDIR /sandbox
 USER sandbox
 
@@ -113,12 +122,16 @@ USER sandbox
 # No runtime writes to openclaw.json are needed or possible.
 # Build args (NEMOCLAW_MODEL, CHAT_UI_URL) customize per deployment.
 # Auth token is generated per build so each image has a unique token.
+#
+# SECURITY: Values are read from os.environ, NOT from shell interpolation.
+# Prior versions used '${VAR}' inside Python string literals, which was
+# vulnerable to injection if a build arg contained single quotes.
 RUN python3 -c "\
 import json, os, secrets; \
 from urllib.parse import urlparse; \
-model = '${NEMOCLAW_MODEL}'; \
-chat_ui_url = '${CHAT_UI_URL}'; \
-extra_origins_raw = '${NEMOCLAW_EXTRA_ORIGINS}'; \
+model = os.environ.get('NEMOCLAW_MODEL', 'nvidia/nemotron-3-super-120b-a12b'); \
+chat_ui_url = os.environ.get('CHAT_UI_URL', 'http://127.0.0.1:18789'); \
+extra_origins_raw = os.environ.get('NEMOCLAW_EXTRA_ORIGINS', ''); \
 parsed = urlparse(chat_ui_url); \
 chat_origin = f'{parsed.scheme}://{parsed.netloc}' if parsed.scheme and parsed.netloc else 'http://127.0.0.1:18789'; \
 origins = ['http://127.0.0.1:18789']; \
