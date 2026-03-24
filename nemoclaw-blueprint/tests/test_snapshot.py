@@ -5,6 +5,7 @@
 """Tests for the NemoClaw migration snapshot module."""
 
 import json
+from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -29,7 +30,7 @@ def fake_home(tmp_path: Path) -> Path:
 
 
 @pytest.fixture(autouse=True)
-def _patch_paths(fake_home: Path) -> None:
+def _patch_paths(fake_home: Path) -> Generator[None]:  # pyright: ignore[reportUnusedFunction]
     """Patch module-level path constants to use fake_home."""
     with (
         patch.object(snap, "HOME", fake_home),

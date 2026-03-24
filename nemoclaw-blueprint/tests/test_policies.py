@@ -5,6 +5,7 @@
 """Tests for NemoClaw policy YAML presets — structural validation."""
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 import yaml
@@ -17,7 +18,7 @@ REQUIRED_POLICY_FIELDS = {"name", "endpoints"}
 REQUIRED_ENDPOINT_FIELDS = {"host", "port"}
 
 
-def _load_yaml(path: Path) -> dict:
+def _load_yaml(path: Path) -> dict[str, Any]:
     with path.open() as f:
         return yaml.safe_load(f)
 
@@ -33,34 +34,34 @@ def _all_preset_files() -> list[Path]:
 
 class TestBaseSandboxPolicy:
     @pytest.fixture()
-    def policy(self) -> dict:
+    def policy(self) -> dict[str, Any]:
         return _load_yaml(POLICIES_DIR / "openclaw-sandbox.yaml")
 
-    def test_has_version(self, policy: dict) -> None:
+    def test_has_version(self, policy: dict[str, Any]) -> None:
         assert "version" in policy
         assert policy["version"] == 1
 
-    def test_has_filesystem_policy(self, policy: dict) -> None:
+    def test_has_filesystem_policy(self, policy: dict[str, Any]) -> None:
         fs = policy["filesystem_policy"]
         assert "read_only" in fs
         assert "read_write" in fs
 
-    def test_has_network_policies(self, policy: dict) -> None:
+    def test_has_network_policies(self, policy: dict[str, Any]) -> None:
         np = policy["network_policies"]
         assert len(np) > 0
 
-    def test_all_policies_have_name_and_endpoints(self, policy: dict) -> None:
+    def test_all_policies_have_name_and_endpoints(self, policy: dict[str, Any]) -> None:
         for key, pol in policy["network_policies"].items():
             assert "name" in pol, f"Policy {key} missing 'name'"
             assert "endpoints" in pol, f"Policy {key} missing 'endpoints'"
 
-    def test_all_endpoints_have_host_and_port(self, policy: dict) -> None:
+    def test_all_endpoints_have_host_and_port(self, policy: dict[str, Any]) -> None:
         for key, pol in policy["network_policies"].items():
             for i, ep in enumerate(pol["endpoints"]):
                 assert "host" in ep, f"Policy {key} endpoint {i} missing 'host'"
                 assert "port" in ep, f"Policy {key} endpoint {i} missing 'port'"
 
-    def test_core_policies_have_binaries(self, policy: dict) -> None:
+    def test_core_policies_have_binaries(self, policy: dict[str, Any]) -> None:
         """Core policies (claude_code, nvidia, github, etc.) must have binaries.
         Messaging policies (telegram, discord) are intentionally unrestricted."""
         messaging = {"telegram", "discord"}
@@ -68,12 +69,12 @@ class TestBaseSandboxPolicy:
             if key not in messaging:
                 assert "binaries" in pol, f"Policy {key} missing 'binaries' section"
 
-    def test_sandbox_user_is_sandbox(self, policy: dict) -> None:
+    def test_sandbox_user_is_sandbox(self, policy: dict[str, Any]) -> None:
         proc = policy["process"]
         assert proc["run_as_user"] == "sandbox"
         assert proc["run_as_group"] == "sandbox"
 
-    def test_openclaw_config_is_read_only(self, policy: dict) -> None:
+    def test_openclaw_config_is_read_only(self, policy: dict[str, Any]) -> None:
         ro = policy["filesystem_policy"]["read_only"]
         assert any(".openclaw" in str(p) for p in ro)
 
@@ -140,19 +141,19 @@ class TestPresetFiles:
 
 class TestLocalInferencePreset:
     @pytest.fixture()
-    def preset(self) -> dict:
+    def preset(self) -> dict[str, Any]:
         return _load_yaml(PRESETS_DIR / "local-inference.yaml")
 
-    def test_allows_ollama_port(self, preset: dict) -> None:
-        endpoints = []
+    def test_allows_ollama_port(self, preset: dict[str, Any]) -> None:
+        endpoints: list[dict[str, Any]] = []
         for pol in preset["network_policies"].values():
             endpoints.extend(pol["endpoints"])
-        ports = {ep["port"] for ep in endpoints}
+        ports: set[int] = {ep["port"] for ep in endpoints}
         assert 11434 in ports  # Default Ollama port
 
-    def test_allows_vllm_port(self, preset: dict) -> None:
-        endpoints = []
+    def test_allows_vllm_port(self, preset: dict[str, Any]) -> None:
+        endpoints: list[dict[str, Any]] = []
         for pol in preset["network_policies"].values():
             endpoints.extend(pol["endpoints"])
-        ports = {ep["port"] for ep in endpoints}
+        ports: set[int] = {ep["port"] for ep in endpoints}
         assert 8000 in ports  # Default vLLM port
