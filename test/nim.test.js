@@ -70,6 +70,296 @@ describe("nim", () => {
     });
   });
 
+  // ── detectGpu branch coverage with dependency injection ────────
+  describe("detectGpu — NVIDIA discrete GPU branches", () => {
+    it("detects single NVIDIA GPU with VRAM", () => {
+      const gpu = nim.detectGpu({
+        runCapture: (cmd) => {
+          if (cmd.includes("memory.total")) return "24576\n";
+          return "";
+        },
+      });
+      assert.deepEqual(gpu, {
+        type: "nvidia",
+        count: 1,
+        totalMemoryMB: 24576,
+        perGpuMB: 24576,
+        nimCapable: true,
+      });
+    });
+
+    it("detects multiple NVIDIA GPUs and sums VRAM", () => {
+      const gpu = nim.detectGpu({
+        runCapture: (cmd) => {
+          if (cmd.includes("memory.total")) return "24576\n24576\n";
+          return "";
+        },
+      });
+      assert.equal(gpu.type, "nvidia");
+      assert.equal(gpu.count, 2);
+      assert.equal(gpu.totalMemoryMB, 49152);
+      assert.equal(gpu.perGpuMB, 24576);
+      assert.equal(gpu.nimCapable, true);
+    });
+
+    it("falls through when nvidia-smi returns empty output", () => {
+      const gpu = nim.detectGpu({
+        platform: "linux",
+        runCapture: () => "",
+      });
+      assert.equal(gpu, null);
+    });
+
+    it("falls through when nvidia-smi returns non-numeric lines", () => {
+      const gpu = nim.detectGpu({
+        platform: "linux",
+        runCapture: (cmd) => {
+          if (cmd.includes("memory.total")) return "N/A\n";
+          if (cmd.includes("name")) return "Unknown GPU\n";
+          return "";
+        },
+      });
+      assert.equal(gpu, null);
+    });
+
+    it("falls through when nvidia-smi throws", () => {
+      const gpu = nim.detectGpu({
+        platform: "linux",
+        runCapture: () => { throw new Error("nvidia-smi not found"); },
+      });
+      assert.equal(gpu, null);
+    });
+  });
+
+  describe("detectGpu — DGX Spark (GB10) branches", () => {
+    it("detects GB10 with system RAM from free -m", () => {
+      const gpu = nim.detectGpu({
+        runCapture: (cmd) => {
+          if (cmd.includes("memory.total")) return "";
+          if (cmd.includes("name")) return "NVIDIA GB10 Superchip\n";
+          if (cmd.includes("free -m")) return "128000";
+          return "";
+        },
+      });
+      assert.deepEqual(gpu, {
+        type: "nvidia",
+        count: 1,
+        totalMemoryMB: 128000,
+        perGpuMB: 128000,
+        nimCapable: true,
+        spark: true,
+      });
+    });
+
+    it("detects GB10 with zero memory when free -m returns empty", () => {
+      const gpu = nim.detectGpu({
+        runCapture: (cmd) => {
+          if (cmd.includes("memory.total")) return "";
+          if (cmd.includes("name")) return "NVIDIA GB10 Superchip\n";
+          if (cmd.includes("free -m")) return "";
+          return "";
+        },
+      });
+      assert.equal(gpu.type, "nvidia");
+      assert.equal(gpu.spark, true);
+      assert.equal(gpu.totalMemoryMB, 0);
+    });
+
+    it("detects GB10 with zero memory when free -m throws", () => {
+      let callCount = 0;
+      const gpu = nim.detectGpu({
+        runCapture: (cmd) => {
+          if (cmd.includes("memory.total")) return "";
+          if (cmd.includes("name")) return "GB10\n";
+          if (cmd.includes("free -m")) throw new Error("free not found");
+          return "";
+        },
+      });
+      assert.equal(gpu.type, "nvidia");
+      assert.equal(gpu.spark, true);
+      assert.equal(gpu.totalMemoryMB, 0);
+    });
+
+    it("detects GB10 with non-numeric free output falls back to 0", () => {
+      const gpu = nim.detectGpu({
+        runCapture: (cmd) => {
+          if (cmd.includes("memory.total")) return "";
+          if (cmd.includes("name")) return "GB10\n";
+          if (cmd.includes("free -m")) return "not-a-number";
+          return "";
+        },
+      });
+      assert.equal(gpu.spark, true);
+      assert.equal(gpu.totalMemoryMB, 0);
+    });
+
+    it("skips GB10 path when name does not contain GB10", () => {
+      const gpu = nim.detectGpu({
+        platform: "linux",
+        runCapture: (cmd) => {
+          if (cmd.includes("memory.total")) return "";
+          if (cmd.includes("name")) return "Tesla T4\n";
+          return "";
+        },
+      });
+      assert.equal(gpu, null);
+    });
+
+    it("skips GB10 path when name query throws", () => {
+      let firstCall = true;
+      const gpu = nim.detectGpu({
+        platform: "linux",
+        runCapture: (cmd) => {
+          if (cmd.includes("memory.total")) return "";
+          throw new Error("nvidia-smi error");
+        },
+      });
+      assert.equal(gpu, null);
+    });
+  });
+
+  describe("detectGpu — Apple Silicon branches", () => {
+    it("detects Apple Silicon with VRAM in GB", () => {
+      const gpu = nim.detectGpu({
+        platform: "darwin",
+        runCapture: (cmd) => {
+          if (cmd.includes("nvidia-smi")) return "";
+          if (cmd.includes("system_profiler")) {
+            return [
+              "Chipset Model: Apple M3 Max",
+              "VRAM (Total): 48 GB",
+              "Total Number of Cores: 40",
+            ].join("\n");
+          }
+          return "";
+        },
+      });
+      assert.deepEqual(gpu, {
+        type: "apple",
+        name: "Apple M3 Max",
+        count: 1,
+        cores: 40,
+        totalMemoryMB: 49152,
+        perGpuMB: 49152,
+        nimCapable: false,
+      });
+    });
+
+    it("detects Apple Silicon with VRAM in MB", () => {
+      const gpu = nim.detectGpu({
+        platform: "darwin",
+        runCapture: (cmd) => {
+          if (cmd.includes("nvidia-smi")) return "";
+          if (cmd.includes("system_profiler")) {
+            return [
+              "Chipset Model: Apple M2",
+              "VRAM (Total): 8192 MB",
+            ].join("\n");
+          }
+          return "";
+        },
+      });
+      assert.equal(gpu.type, "apple");
+      assert.equal(gpu.name, "Apple M2");
+      assert.equal(gpu.totalMemoryMB, 8192);
+      assert.equal(gpu.cores, null);
+    });
+
+    it("Apple Silicon without VRAM falls back to sysctl hw.memsize", () => {
+      const gpu = nim.detectGpu({
+        platform: "darwin",
+        runCapture: (cmd) => {
+          if (cmd.includes("nvidia-smi")) return "";
+          if (cmd.includes("system_profiler")) {
+            return "Chipset Model: Apple M1\nTotal Number of Cores: 8";
+          }
+          if (cmd.includes("sysctl")) return "17179869184"; // 16 GB
+          return "";
+        },
+      });
+      assert.equal(gpu.type, "apple");
+      assert.equal(gpu.name, "Apple M1");
+      assert.equal(gpu.totalMemoryMB, 16384);
+      assert.equal(gpu.cores, 8);
+    });
+
+    it("Apple Silicon without VRAM and sysctl throws gives 0 memory", () => {
+      const gpu = nim.detectGpu({
+        platform: "darwin",
+        runCapture: (cmd) => {
+          if (cmd.includes("nvidia-smi")) return "";
+          if (cmd.includes("system_profiler")) {
+            return "Chipset Model: Apple M1";
+          }
+          if (cmd.includes("sysctl")) throw new Error("sysctl failed");
+          return "";
+        },
+      });
+      assert.equal(gpu.type, "apple");
+      assert.equal(gpu.totalMemoryMB, 0);
+    });
+
+    it("Apple Silicon without VRAM and empty sysctl gives 0 memory", () => {
+      const gpu = nim.detectGpu({
+        platform: "darwin",
+        runCapture: (cmd) => {
+          if (cmd.includes("nvidia-smi")) return "";
+          if (cmd.includes("system_profiler")) {
+            return "Chipset Model: Apple M1 Ultra";
+          }
+          if (cmd.includes("sysctl")) return "";
+          return "";
+        },
+      });
+      assert.equal(gpu.type, "apple");
+      assert.equal(gpu.totalMemoryMB, 0);
+    });
+
+    it("returns null when system_profiler has no Chipset Model", () => {
+      const gpu = nim.detectGpu({
+        platform: "darwin",
+        runCapture: (cmd) => {
+          if (cmd.includes("nvidia-smi")) return "";
+          if (cmd.includes("system_profiler")) return "Some other output\nNo chipset info";
+          return "";
+        },
+      });
+      assert.equal(gpu, null);
+    });
+
+    it("returns null when system_profiler returns empty", () => {
+      const gpu = nim.detectGpu({
+        platform: "darwin",
+        runCapture: (cmd) => {
+          if (cmd.includes("nvidia-smi")) return "";
+          if (cmd.includes("system_profiler")) return "";
+          return "";
+        },
+      });
+      assert.equal(gpu, null);
+    });
+
+    it("returns null when system_profiler throws", () => {
+      const gpu = nim.detectGpu({
+        platform: "darwin",
+        runCapture: (cmd) => {
+          if (cmd.includes("nvidia-smi")) return "";
+          if (cmd.includes("system_profiler")) throw new Error("not available");
+          return "";
+        },
+      });
+      assert.equal(gpu, null);
+    });
+
+    it("skips Apple path entirely on non-darwin platform", () => {
+      const gpu = nim.detectGpu({
+        platform: "linux",
+        runCapture: () => "",
+      });
+      assert.equal(gpu, null);
+    });
+  });
+
   describe("nimStatus", () => {
     it("returns not running for nonexistent container", () => {
       const st = nim.nimStatus("nonexistent-test-xyz");
