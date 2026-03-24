@@ -32,6 +32,7 @@ const {
 const registry = require("./lib/registry");
 const nim = require("./lib/nim");
 const policies = require("./lib/policies");
+const { handleHelpFlag } = require("./lib/command-help");
 
 // ── Global commands ──────────────────────────────────────────────
 
@@ -659,6 +660,9 @@ if (isVerbose()) {
 
   // Global commands
   if (GLOBAL_COMMANDS.has(cmd)) {
+    // Per-command --help: intercept before dispatch
+    if (handleHelpFlag(args, cmd, "global")) return;
+
     switch (cmd) {
       case "onboard":     await onboard(args); break;
       case "setup":       await setup(); break;
@@ -689,6 +693,9 @@ if (isVerbose()) {
     validateName(cmd, "sandbox name");
     const action = args[0] || "connect";
     const actionArgs = args.slice(1);
+
+    // Per-action --help: intercept before dispatch
+    if (handleHelpFlag(actionArgs, action, "sandbox")) return;
 
     switch (action) {
       case "connect":     sandboxConnect(cmd); break;
