@@ -340,53 +340,73 @@ function getNonInteractiveModel(providerKey) {
 
 // ── Step 1: Preflight ────────────────────────────────────────────
 
-async function preflight() {
-  step(1, 7, "Preflight checks");
+async function preflight(deps) {
+  const _step = (deps && deps.step) || step;
+  const _isDockerRunning = (deps && deps.isDockerRunning) || isDockerRunning;
+  const _getContainerRuntime = (deps && deps.getContainerRuntime) || getContainerRuntime;
+  const _isUnsupportedMacosRuntime = (deps && deps.isUnsupportedMacosRuntime) || isUnsupportedMacosRuntime;
+  const _isOpenshellInstalled = (deps && deps.isOpenshellInstalled) || isOpenshellInstalled;
+  const _installOpenshell = (deps && deps.installOpenshell) || installOpenshell;
+  const _runCapture = (deps && deps.runCapture) || runCapture;
+  const _run = (deps && deps.run) || run;
+  const _hasStaleGateway = (deps && deps.hasStaleGateway) || hasStaleGateway;
+  const _getConfiguredPorts = (deps && deps.getConfiguredPorts) || getConfiguredPorts;
+  const _resolvePort = (deps && deps.resolvePort) || resolvePort;
+  const _detectGpu = (deps && deps.detectGpu) || nim.detectGpu;
+  const _exit = (deps && deps.exit) || process.exit;
+  const _env = (deps && deps.env) || process.env;
+  const _log = (deps && deps.log) || console.log;
+  const _error = (deps && deps.error) || console.error;
+
+  _step(1, 7, "Preflight checks");
 
   // Docker
-  if (!isDockerRunning()) {
-    console.error("  Docker is not running. Please start Docker and try again.");
-    process.exit(1);
+  if (!_isDockerRunning()) {
+    _error("  Docker is not running. Please start Docker and try again.");
+    _exit(1);
+    return null;
   }
-  console.log("  ✓ Docker is running");
+  _log("  ✓ Docker is running");
 
-  const runtime = getContainerRuntime();
-  if (isUnsupportedMacosRuntime(runtime)) {
-    console.error("  Podman on macOS is not supported by NemoClaw at this time.");
-    console.error("  OpenShell currently depends on Docker host-gateway behavior that Podman on macOS does not provide.");
-    console.error("  Use Colima or Docker Desktop on macOS instead.");
-    process.exit(1);
+  const runtime = _getContainerRuntime();
+  if (_isUnsupportedMacosRuntime(runtime)) {
+    _error("  Podman on macOS is not supported by NemoClaw at this time.");
+    _error("  OpenShell currently depends on Docker host-gateway behavior that Podman on macOS does not provide.");
+    _error("  Use Colima or Docker Desktop on macOS instead.");
+    _exit(1);
+    return null;
   }
   if (runtime !== "unknown") {
-    console.log(`  ✓ Container runtime: ${runtime}`);
+    _log(`  ✓ Container runtime: ${runtime}`);
   }
 
   // OpenShell CLI
-  if (!isOpenshellInstalled()) {
-    console.log("  openshell CLI not found. Installing...");
-    if (!installOpenshell()) {
-      console.error("  Failed to install openshell CLI.");
-      console.error("  Install manually: https://github.com/NVIDIA/OpenShell/releases");
-      process.exit(1);
+  if (!_isOpenshellInstalled()) {
+    _log("  openshell CLI not found. Installing...");
+    if (!_installOpenshell()) {
+      _error("  Failed to install openshell CLI.");
+      _error("  Install manually: https://github.com/NVIDIA/OpenShell/releases");
+      _exit(1);
+      return null;
     }
   }
-  console.log(`  ✓ openshell CLI: ${runCapture("openshell --version 2>/dev/null || echo unknown", { ignoreError: true })}`);
+  _log(`  ✓ openshell CLI: ${_runCapture("openshell --version 2>/dev/null || echo unknown", { ignoreError: true })}`);
 
   // Clean up stale NemoClaw session before checking ports.
   // A previous onboard run may have left the gateway container and port
   // forward running.  If a NemoClaw-owned gateway is still present, tear
   // it down so the port check below doesn't fail on our own leftovers.
-  const gwInfo = runCapture("openshell gateway info -g nemoclaw 2>/dev/null", { ignoreError: true });
-  if (hasStaleGateway(gwInfo)) {
-    console.log("  Cleaning up previous NemoClaw session...");
-    const staleDashPort = process.env.NEMOCLAW_DASHBOARD_PORT || "18789";
-    run(`openshell forward stop ${staleDashPort} 2>/dev/null || true`, { ignoreError: true });
-    run("openshell gateway destroy -g nemoclaw 2>/dev/null || true", { ignoreError: true });
-    console.log("  ✓ Previous session cleaned up");
+  const gwInfo = _runCapture("openshell gateway info -g nemoclaw 2>/dev/null", { ignoreError: true });
+  if (_hasStaleGateway(gwInfo)) {
+    _log("  Cleaning up previous NemoClaw session...");
+    const staleDashPort = _env.NEMOCLAW_DASHBOARD_PORT || "18789";
+    _run(`openshell forward stop ${staleDashPort} 2>/dev/null || true`, { ignoreError: true });
+    _run("openshell gateway destroy -g nemoclaw 2>/dev/null || true", { ignoreError: true });
+    _log("  ✓ Previous session cleaned up");
   }
 
   // Required ports — configurable via NEMOCLAW_GATEWAY_PORT / NEMOCLAW_DASHBOARD_PORT / NEMOCLAW_NIM_PORT
-  const { gatewayPort, dashboardPort, nimPort } = getConfiguredPorts();
+  const { gatewayPort, dashboardPort, nimPort } = _getConfiguredPorts();
   const requiredPorts = [
     { port: gatewayPort, label: "OpenShell gateway", envVar: "NEMOCLAW_GATEWAY_PORT" },
     { port: dashboardPort, label: "NemoClaw dashboard", envVar: "NEMOCLAW_DASHBOARD_PORT" },
@@ -394,57 +414,58 @@ async function preflight() {
   ];
   const resolvedPorts = {};
   for (const { port, label, envVar } of requiredPorts) {
-    const resolved = await resolvePort(port);
+    const resolved = await _resolvePort(port);
     if (resolved.conflict) {
       // Neither the preferred port nor any alternative is free
       const portCheck = resolved.conflict;
-      console.error("");
-      console.error(`  !! Port ${port} is not available.`);
-      console.error(`     ${label} needs this port.`);
-      console.error("");
+      _error("");
+      _error(`  !! Port ${port} is not available.`);
+      _error(`     ${label} needs this port.`);
+      _error("");
       if (portCheck.process && portCheck.process !== "unknown") {
-        console.error(`     Blocked by: ${portCheck.process}${portCheck.pid ? ` (PID ${portCheck.pid})` : ""}`);
-        console.error("");
-        console.error("     To fix, stop the conflicting process:");
-        console.error("");
+        _error(`     Blocked by: ${portCheck.process}${portCheck.pid ? ` (PID ${portCheck.pid})` : ""}`);
+        _error("");
+        _error("     To fix, stop the conflicting process:");
+        _error("");
         if (portCheck.pid) {
-          console.error(`       sudo kill ${portCheck.pid}`);
+          _error(`       sudo kill ${portCheck.pid}`);
         } else {
-          console.error(`       sudo lsof -i :${port} -sTCP:LISTEN -P -n`);
+          _error(`       sudo lsof -i :${port} -sTCP:LISTEN -P -n`);
         }
-        console.error("       # or, if it's a systemd service:");
-        console.error("       systemctl --user stop openclaw-gateway.service");
+        _error("       # or, if it's a systemd service:");
+        _error("       systemctl --user stop openclaw-gateway.service");
       } else {
-        console.error(`     Could not identify the process using port ${port}.`);
-        console.error(`     Run: sudo lsof -i :${port} -sTCP:LISTEN`);
+        _error(`     Could not identify the process using port ${port}.`);
+        _error(`     Run: sudo lsof -i :${port} -sTCP:LISTEN`);
       }
-      console.error("");
-      console.error(`     You can also set ${envVar}=<port> to use a different port.`);
-      console.error(`     Detail: ${portCheck.reason}`);
-      process.exit(1);
+      _error("");
+      _error(`     You can also set ${envVar}=<port> to use a different port.`);
+      _error(`     Detail: ${portCheck.reason}`);
+      _exit(1);
+      return null;
     }
     if (resolved.changed) {
-      console.log(`  ⚠ Port ${resolved.original} in use — using ${resolved.port} instead (${label})`);
-      console.log(`    To make permanent: export ${envVar}=${resolved.port}`);
+      _log(`  ⚠ Port ${resolved.original} in use — using ${resolved.port} instead (${label})`);
+      _log(`    To make permanent: export ${envVar}=${resolved.port}`);
     } else {
-      console.log(`  ✓ Port ${resolved.port} available (${label})`);
+      _log(`  ✓ Port ${resolved.port} available (${label})`);
     }
     resolvedPorts[envVar] = resolved.port;
   }
   // Store resolved ports for downstream steps
-  process.env._NEMOCLAW_RESOLVED_GATEWAY_PORT = String(resolvedPorts.NEMOCLAW_GATEWAY_PORT);
-  process.env._NEMOCLAW_RESOLVED_DASHBOARD_PORT = String(resolvedPorts.NEMOCLAW_DASHBOARD_PORT);
-  process.env._NEMOCLAW_RESOLVED_NIM_PORT = String(resolvedPorts.NEMOCLAW_NIM_PORT);
+  _env._NEMOCLAW_RESOLVED_GATEWAY_PORT = String(resolvedPorts.NEMOCLAW_GATEWAY_PORT);
+  _env._NEMOCLAW_RESOLVED_DASHBOARD_PORT = String(resolvedPorts.NEMOCLAW_DASHBOARD_PORT);
+  _env._NEMOCLAW_RESOLVED_NIM_PORT = String(resolvedPorts.NEMOCLAW_NIM_PORT);
 
   // GPU
-  const gpu = nim.detectGpu();
+  const gpu = _detectGpu();
   if (gpu && gpu.type === "nvidia") {
-    console.log(`  ✓ NVIDIA GPU detected: ${gpu.count} GPU(s), ${gpu.totalMemoryMB} MB VRAM`);
+    _log(`  ✓ NVIDIA GPU detected: ${gpu.count} GPU(s), ${gpu.totalMemoryMB} MB VRAM`);
   } else if (gpu && gpu.type === "apple") {
-    console.log(`  ✓ Apple GPU detected: ${gpu.name}${gpu.cores ? ` (${gpu.cores} cores)` : ""}, ${gpu.totalMemoryMB} MB unified memory`);
-    console.log("  ⓘ NIM requires NVIDIA GPU — will use cloud inference");
+    _log(`  ✓ Apple GPU detected: ${gpu.name}${gpu.cores ? ` (${gpu.cores} cores)` : ""}, ${gpu.totalMemoryMB} MB unified memory`);
+    _log("  ⓘ NIM requires NVIDIA GPU — will use cloud inference");
   } else {
-    console.log("  ⓘ No GPU detected — will use cloud inference");
+    _log("  ⓘ No GPU detected — will use cloud inference");
   }
 
   return gpu;
@@ -597,10 +618,33 @@ function patchDockerfileExtraOrigins(dockerfilePath, extraOrigins) {
   fs.writeFileSync(dockerfilePath, content);
 }
 
-async function createSandbox(gpu, model) {
-  step(4, 7, "Creating sandbox");
+async function createSandbox(gpu, model, deps) {
+  const _step = (deps && deps.step) || step;
+  const _promptOrDefault = (deps && deps.promptOrDefault) || promptOrDefault;
+  const _isNonInteractive = (deps && deps.isNonInteractive) || isNonInteractive;
+  const _note = (deps && deps.note) || note;
+  const _prompt = (deps && deps.prompt) || prompt;
+  const _run = (deps && deps.run) || run;
+  const _runCapture = (deps && deps.runCapture) || runCapture;
+  const _registry = (deps && deps.registry) || registry;
+  const _patchDockerfileModel = (deps && deps.patchDockerfileModel) || patchDockerfileModel;
+  const _patchDockerfileVersion = (deps && deps.patchDockerfileVersion) || patchDockerfileVersion;
+  const _patchDockerfileExtraOrigins = (deps && deps.patchDockerfileExtraOrigins) || patchDockerfileExtraOrigins;
+  const _buildCredentialEnv = (deps && deps.buildCredentialEnv) || buildCredentialEnv;
+  const _shellQuote = (deps && deps.shellQuote) || shellQuote;
+  const _streamSandboxCreate = (deps && deps.streamSandboxCreate) || streamSandboxCreate;
+  const _isSandboxReady = (deps && deps.isSandboxReady) || isSandboxReady;
+  const _exit = (deps && deps.exit) || process.exit;
+  const _env = (deps && deps.env) || process.env;
+  const _log = (deps && deps.log) || console.log;
+  const _error = (deps && deps.error) || console.error;
+  const _mkdtempSync = (deps && deps.mkdtempSync) || fs.mkdtempSync;
+  const _copyFileSync = (deps && deps.copyFileSync) || fs.copyFileSync;
+  const _spawnSync = (deps && deps.spawnSync) || require("child_process").spawnSync;
 
-  const nameAnswer = await promptOrDefault(
+  _step(4, 7, "Creating sandbox");
+
+  const nameAnswer = await _promptOrDefault(
     "  Sandbox name (lowercase, numbers, hyphens) [my-assistant]: ",
     "NEMOCLAW_SANDBOX_NAME", "my-assistant"
   );
@@ -609,59 +653,59 @@ async function createSandbox(gpu, model) {
   // Validate: RFC 1123 subdomain — lowercase alphanumeric and hyphens,
   // must start and end with alphanumeric (required by Kubernetes/OpenShell)
   if (!/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/.test(sandboxName)) {
-    console.error(`  Invalid sandbox name: '${sandboxName}'`);
-    console.error("  Names must be lowercase, contain only letters, numbers, and hyphens,");
-    console.error("  and must start and end with a letter or number.");
-    process.exit(1);
+    _error(`  Invalid sandbox name: '${sandboxName}'`);
+    _error("  Names must be lowercase, contain only letters, numbers, and hyphens,");
+    _error("  and must start and end with a letter or number.");
+    _exit(1);
+    return sandboxName;
   }
 
   // Check if sandbox already exists in registry
-  const existing = registry.getSandbox(sandboxName);
+  const existing = _registry.getSandbox(sandboxName);
   if (existing) {
-    if (isNonInteractive()) {
-      if (process.env.NEMOCLAW_RECREATE_SANDBOX !== "1") {
-        console.error(`  Sandbox '${sandboxName}' already exists.`);
-        console.error("  Set NEMOCLAW_RECREATE_SANDBOX=1 to recreate it in non-interactive mode.");
-        process.exit(1);
+    if (_isNonInteractive()) {
+      if (_env.NEMOCLAW_RECREATE_SANDBOX !== "1") {
+        _error(`  Sandbox '${sandboxName}' already exists.`);
+        _error("  Set NEMOCLAW_RECREATE_SANDBOX=1 to recreate it in non-interactive mode.");
+        _exit(1);
+        return sandboxName;
       }
-      note(`  [non-interactive] Sandbox '${sandboxName}' exists — recreating`);
+      _note(`  [non-interactive] Sandbox '${sandboxName}' exists — recreating`);
     } else {
-      const recreate = await prompt(`  Sandbox '${sandboxName}' already exists. Recreate? [y/N]: `);
+      const recreate = await _prompt(`  Sandbox '${sandboxName}' already exists. Recreate? [y/N]: `);
       if (recreate.toLowerCase() !== "y") {
-        console.log("  Keeping existing sandbox.");
+        _log("  Keeping existing sandbox.");
         return sandboxName;
       }
     }
     // Destroy old sandbox
-    run(`openshell sandbox delete "${sandboxName}" 2>/dev/null || true`, { ignoreError: true });
-    registry.removeSandbox(sandboxName);
+    _run(`openshell sandbox delete "${sandboxName}" 2>/dev/null || true`, { ignoreError: true });
+    _registry.removeSandbox(sandboxName);
   }
 
   // Stage build context
-  const { mkdtempSync } = require("fs");
-  const os = require("os");
-  const buildCtx = fs.mkdtempSync(path.join(os.tmpdir(), "nemoclaw-build-"));
-  fs.copyFileSync(path.join(ROOT, "Dockerfile"), path.join(buildCtx, "Dockerfile"));
-  run(`cp -r "${path.join(ROOT, "nemoclaw")}" "${buildCtx}/nemoclaw"`);
-  run(`cp -r "${path.join(ROOT, "nemoclaw-blueprint")}" "${buildCtx}/nemoclaw-blueprint"`);
-  run(`cp -r "${path.join(ROOT, "scripts")}" "${buildCtx}/scripts"`);
-  run(`rm -rf "${buildCtx}/nemoclaw/node_modules"`, { ignoreError: true });
+  const buildCtx = _mkdtempSync(path.join(os.tmpdir(), "nemoclaw-build-"));
+  _copyFileSync(path.join(ROOT, "Dockerfile"), path.join(buildCtx, "Dockerfile"));
+  _run(`cp -r "${path.join(ROOT, "nemoclaw")}" "${buildCtx}/nemoclaw"`);
+  _run(`cp -r "${path.join(ROOT, "nemoclaw-blueprint")}" "${buildCtx}/nemoclaw-blueprint"`);
+  _run(`cp -r "${path.join(ROOT, "scripts")}" "${buildCtx}/scripts"`);
+  _run(`rm -rf "${buildCtx}/nemoclaw/node_modules"`, { ignoreError: true });
 
   // Patch Dockerfile so openclaw.json is built with the user-selected model
   // instead of the default. Without this, Ollama/vLLM/NIM users see the
   // wrong model in the OpenClaw TUI.  Ref: #628
-  patchDockerfileModel(path.join(buildCtx, "Dockerfile"), model);
+  _patchDockerfileModel(path.join(buildCtx, "Dockerfile"), model);
 
   // Allow overriding the bundled OpenClaw version.  Ref: #739
-  patchDockerfileVersion(
+  _patchDockerfileVersion(
     path.join(buildCtx, "Dockerfile"),
-    process.env.NEMOCLAW_OPENCLAW_VERSION
+    _env.NEMOCLAW_OPENCLAW_VERSION
   );
 
   // Allow extra CORS origins for headless / remote access.  Ref: #739
-  patchDockerfileExtraOrigins(
+  _patchDockerfileExtraOrigins(
     path.join(buildCtx, "Dockerfile"),
-    process.env.NEMOCLAW_EXTRA_ORIGINS
+    _env.NEMOCLAW_EXTRA_ORIGINS
   );
 
   // Create sandbox (use -- echo to avoid dropping into interactive shell)
@@ -674,84 +718,86 @@ async function createSandbox(gpu, model) {
   ];
   // --gpu is intentionally omitted. See comment in startGateway().
 
-  console.log(`  Creating sandbox '${sandboxName}' (this takes a few minutes on first run)...`);
-  const resolvedDashPort = process.env._NEMOCLAW_RESOLVED_DASHBOARD_PORT || "18789";
-  const chatUiUrl = process.env.CHAT_UI_URL || `http://127.0.0.1:${resolvedDashPort}`;
-  const envArgs = [`CHAT_UI_URL=${shellQuote(chatUiUrl)}`];
-  const credEnv = buildCredentialEnv(["NVIDIA_API_KEY", "DISCORD_BOT_TOKEN", "SLACK_BOT_TOKEN"]);
+  _log(`  Creating sandbox '${sandboxName}' (this takes a few minutes on first run)...`);
+  const resolvedDashPort = _env._NEMOCLAW_RESOLVED_DASHBOARD_PORT || "18789";
+  const chatUiUrl = _env.CHAT_UI_URL || `http://127.0.0.1:${resolvedDashPort}`;
+  const envArgs = [`CHAT_UI_URL=${_shellQuote(chatUiUrl)}`];
+  const credEnv = _buildCredentialEnv(["NVIDIA_API_KEY", "DISCORD_BOT_TOKEN", "SLACK_BOT_TOKEN"]);
   for (const [key, val] of Object.entries(credEnv)) {
-    envArgs.push(`${key}=${shellQuote(val)}`);
+    envArgs.push(`${key}=${_shellQuote(val)}`);
   }
 
   // Run without piping through awk — the pipe masked non-zero exit codes
   // from openshell because bash returns the status of the last pipeline
   // command (awk, always 0) unless pipefail is set. Removing the pipe
   // lets the real exit code flow through to run().
-  const createResult = await streamSandboxCreate(
+  const createResult = await _streamSandboxCreate(
     `openshell sandbox create ${createArgs.join(" ")} -- env ${envArgs.join(" ")} nemoclaw-start 2>&1`
   );
 
   // Clean up build context regardless of outcome
-  run(`rm -rf "${buildCtx}"`, { ignoreError: true });
+  _run(`rm -rf "${buildCtx}"`, { ignoreError: true });
 
   if (createResult.status !== 0) {
-    console.error("");
-    console.error(`  Sandbox creation failed (exit ${createResult.status}).`);
+    _error("");
+    _error(`  Sandbox creation failed (exit ${createResult.status}).`);
     if (createResult.output) {
-      console.error("");
-      console.error(createResult.output);
+      _error("");
+      _error(createResult.output);
     }
-    console.error("  Try:  openshell sandbox list        # check gateway state");
-    console.error("  Try:  nemoclaw onboard              # retry from scratch");
-    process.exit(createResult.status || 1);
+    _error("  Try:  openshell sandbox list        # check gateway state");
+    _error("  Try:  nemoclaw onboard              # retry from scratch");
+    _exit(createResult.status || 1);
+    return sandboxName;
   }
 
   // Wait for sandbox to reach Ready state in k3s before registering.
   // On WSL2 + Docker Desktop the pod can take longer to initialize;
   // without this gate, NemoClaw registers a phantom sandbox that
   // causes "sandbox not found" on every subsequent connect/status call.
-  console.log("  Waiting for sandbox to become ready...");
+  _log("  Waiting for sandbox to become ready...");
   let ready = false;
   for (let i = 0; i < 30; i++) {
-    const list = runCapture("openshell sandbox list 2>&1", { ignoreError: true });
-    if (isSandboxReady(list, sandboxName)) {
+    const list = _runCapture("openshell sandbox list 2>&1", { ignoreError: true });
+    if (_isSandboxReady(list, sandboxName)) {
       ready = true;
       break;
     }
-    require("child_process").spawnSync("sleep", ["2"]);
+    _spawnSync("sleep", ["2"]);
   }
 
   if (!ready) {
     // Clean up the orphaned sandbox so the next onboard retry with the same
     // name doesn't fail on "sandbox already exists".
-    const delResult = run(`openshell sandbox delete "${sandboxName}" 2>/dev/null || true`, { ignoreError: true });
-    console.error("");
-    console.error(`  Sandbox '${sandboxName}' was created but did not become ready within 60s.`);
+    const delResult = _run(`openshell sandbox delete "${sandboxName}" 2>/dev/null || true`, { ignoreError: true });
+    _error("");
+    _error(`  Sandbox '${sandboxName}' was created but did not become ready within 60s.`);
     if (delResult.status === 0) {
-      console.error("  The orphaned sandbox has been removed — you can safely retry.");
+      _error("  The orphaned sandbox has been removed — you can safely retry.");
     } else {
-      console.error(`  Could not remove the orphaned sandbox. Manual cleanup:`);
-      console.error(`    openshell sandbox delete "${sandboxName}"`);
+      _error(`  Could not remove the orphaned sandbox. Manual cleanup:`);
+      _error(`    openshell sandbox delete "${sandboxName}"`);
     }
-    console.error("  Retry: nemoclaw onboard");
-    process.exit(1);
+    _error("  Retry: nemoclaw onboard");
+    _exit(1);
+    return sandboxName;
   }
 
   // Release any stale forward on the dashboard port before claiming it for the new sandbox.
   // A previous onboard run may have left the port forwarded to a different sandbox,
   // which would silently prevent the new sandbox's dashboard from being reachable.
-  const dashPort = process.env._NEMOCLAW_RESOLVED_DASHBOARD_PORT || "18789";
-  run(`openshell forward stop ${dashPort} 2>/dev/null || true`, { ignoreError: true });
+  const dashPort = _env._NEMOCLAW_RESOLVED_DASHBOARD_PORT || "18789";
+  _run(`openshell forward stop ${dashPort} 2>/dev/null || true`, { ignoreError: true });
   // Forward dashboard port to the new sandbox
-  run(`openshell forward start --background ${dashPort} "${sandboxName}"`, { ignoreError: true });
+  _run(`openshell forward start --background ${dashPort} "${sandboxName}"`, { ignoreError: true });
 
   // Register only after confirmed ready — prevents phantom entries
-  registry.registerSandbox({
+  _registry.registerSandbox({
     name: sandboxName,
     gpuEnabled: !!gpu,
   });
 
-  console.log(`  ✓ Sandbox '${sandboxName}' created`);
+  _log(`  ✓ Sandbox '${sandboxName}' created`);
   return sandboxName;
 }
 
@@ -1366,6 +1412,7 @@ async function onboard(opts = {}) {
 
 module.exports = {
   buildSandboxConfigSyncScript,
+  createSandbox,
   getContainerRuntime,
   getInstalledOpenshellVersion,
   getNonInteractiveModel,
@@ -1385,6 +1432,7 @@ module.exports = {
   patchDockerfileExtraOrigins,
   patchDockerfileModel,
   patchDockerfileVersion,
+  preflight,
   printDashboard,
   promptCloudModel,
   promptOllamaModel,
