@@ -146,8 +146,20 @@ function checkForUpdate(install) {
 
 /**
  * Update a source-based installation.
+ * @param {string} sourceDir
+ * @param {object} [deps] - Injectable dependencies for testing.
+ * @param {function} [deps.exec] - Replacement for module-level exec().
+ * @param {function} [deps.execSync] - Replacement for child_process.execSync.
+ * @param {function} [deps.write] - Replacement for process.stdout.write.
+ * @param {function} [deps.log] - Replacement for console.log.
+ * @param {function} [deps.logError] - Replacement for console.error.
  */
-function updateSource(sourceDir) {
+function updateSource(sourceDir, deps = {}) {
+  const { exec: _exec, execSync: _execSync, write: _write, log: _log, logError: _logError } = {
+    exec, execSync, write: (s) => process.stdout.write(s),
+    log: console.log.bind(console), logError: console.error.bind(console), ...deps,
+  };
+
   const steps = [
     { msg: "Fetching latest changes", cmd: "git fetch origin main" },
     { msg: "Updating to latest", cmd: "git reset --hard origin/main" },
@@ -157,26 +169,26 @@ function updateSource(sourceDir) {
   ];
 
   for (const { msg, cmd } of steps) {
-    process.stdout.write(`  ${msg}...`);
-    const result = exec(cmd, { cwd: sourceDir, timeout: 300_000 });
+    _write(`  ${msg}...`);
+    const result = _exec(cmd, { cwd: sourceDir, timeout: 300_000 });
     if (result === null) {
       // execSync threw — check if it was really a failure
       // Some commands (like git fetch) may output to stderr but succeed
       try {
-        execSync(cmd, {
+        _execSync(cmd, {
           cwd: sourceDir,
           stdio: "pipe",
           timeout: 300_000,
         });
-        console.log(" done");
+        _log(" done");
       } catch (err) {
-        console.log(" FAILED");
+        _log(" FAILED");
         const stderr = err.stderr ? err.stderr.toString().trim() : "";
-        if (stderr) console.error(`    ${stderr}`);
+        if (stderr) _logError(`    ${stderr}`);
         return false;
       }
     } else {
-      console.log(" done");
+      _log(" done");
     }
   }
   return true;
@@ -184,36 +196,44 @@ function updateSource(sourceDir) {
 
 /**
  * Update a global npm installation.
+ * @param {object} [deps] - Injectable dependencies for testing.
  */
-function updateGlobal() {
-  process.stdout.write("  Installing latest NemoClaw from GitHub...");
-  const result = exec(`npm install -g git+https://${REPO_URL.replace("https://", "")}`, {
+function updateGlobal(deps = {}) {
+  const { exec: _exec, execSync: _execSync, write: _write, log: _log, logError: _logError } = {
+    exec, execSync, write: (s) => process.stdout.write(s),
+    log: console.log.bind(console), logError: console.error.bind(console), ...deps,
+  };
+
+  _write("  Installing latest NemoClaw from GitHub...");
+  const result = _exec(`npm install -g git+https://${REPO_URL.replace("https://", "")}`, {
     timeout: 300_000,
   });
   if (result === null) {
     try {
-      execSync(`npm install -g git+https://${REPO_URL.replace("https://", "")}`, {
+      _execSync(`npm install -g git+https://${REPO_URL.replace("https://", "")}`, {
         stdio: "pipe",
         timeout: 300_000,
       });
-      console.log(" done");
+      _log(" done");
       return true;
     } catch (err) {
-      console.log(" FAILED");
+      _log(" FAILED");
       const stderr = err.stderr ? err.stderr.toString().trim() : "";
-      if (stderr) console.error(`    ${stderr}`);
+      if (stderr) _logError(`    ${stderr}`);
       return false;
     }
   }
-  console.log(" done");
+  _log(" done");
   return true;
 }
 
 /**
  * Verify the update by checking nemoclaw --version.
+ * @param {object} [deps] - Injectable dependencies for testing.
  */
-function verifyUpdate() {
-  const out = exec("nemoclaw --version");
+function verifyUpdate(deps = {}) {
+  const { exec: _exec } = { exec, ...deps };
+  const out = _exec("nemoclaw --version");
   return out || null;
 }
 

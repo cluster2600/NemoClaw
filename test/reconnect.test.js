@@ -472,4 +472,44 @@ describe("reconnect", () => {
     assert.ok(result.steps.some((s) => s.includes("CoreDNS patched")));
     require("../bin/lib/registry").getSandbox = origGetSandbox;
   });
+
+  it("fails when gateway restarts but does not become healthy", () => {
+    require("../bin/lib/registry").getSandbox = () => null;
+    const result = reconnect("openclaw", {
+      runCapture: (cmd) => {
+        if (cmd.includes("gateway info")) return "";
+        if (cmd.includes("openshell -V")) return "openshell 1.0.0";
+        // Status never becomes Connected
+        if (cmd.includes("status")) return "Disconnected";
+        return "";
+      },
+      run: () => {},
+      maxAttempts: 1,
+    });
+    assert.equal(result.success, false);
+    assert.ok(result.errors.some((e) => e.includes("Gateway failed to become healthy")));
+    assert.ok(result.steps.some((s) => s.includes("Restarting gateway")));
+    require("../bin/lib/registry").getSandbox = origGetSandbox;
+  });
+
+  it("fails when sandbox exists but does not become ready within timeout", () => {
+    require("../bin/lib/registry").getSandbox = () => null;
+    const result = reconnect("openclaw", {
+      runCapture: (cmd) => {
+        if (cmd.includes("gateway info")) return "nemoclaw Running";
+        if (cmd.includes("status")) return "Connected";
+        // Sandbox exists but is always NotReady
+        if (cmd.includes("sandbox list")) return "openclaw   NotReady";
+        if (cmd.includes("docker info")) return "";
+        return "";
+      },
+      run: () => {},
+      maxAttempts: 1,
+      sleepSec: 0,
+    });
+    assert.equal(result.success, false);
+    assert.ok(result.errors.some((e) => e.includes("did not become ready")));
+    assert.ok(result.steps.some((s) => s.includes("Waiting for sandbox")));
+    require("../bin/lib/registry").getSandbox = origGetSandbox;
+  });
 });

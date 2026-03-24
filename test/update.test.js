@@ -13,6 +13,9 @@ const {
   readVersion,
   fetchRemoteHead,
   getLocalHead,
+  updateSource,
+  updateGlobal,
+  verifyUpdate,
   DEFAULT_SOURCE_DIR,
   REPO_URL,
 } = require("../bin/lib/update");
@@ -162,5 +165,217 @@ describe("update — CLI integration", () => {
       r.out.includes("Installation:") || r.out.includes("Could not detect"),
       "should show installation info or detection failure"
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// updateSource — DI-based tests
+// ---------------------------------------------------------------------------
+
+describe("update — updateSource", () => {
+  const noop = () => {};
+
+  it("returns true when all steps succeed on first exec", () => {
+    const msgs = [];
+    const result = updateSource("/fake/dir", {
+      exec: () => "ok",
+      execSync: () => { throw new Error("should not be called"); },
+      write: (s) => msgs.push(s),
+      log: (s) => msgs.push(s),
+      logError: noop,
+    });
+    assert.equal(result, true);
+    // Should have 5 steps, each with write + log
+    assert.equal(msgs.filter((m) => m.includes("...")).length, 5);
+    assert.equal(msgs.filter((m) => m === " done").length, 5);
+  });
+
+  it("retries with execSync when exec returns null, and succeeds", () => {
+    const retried = [];
+    const result = updateSource("/fake/dir", {
+      exec: () => null, // always returns null (simulates stderr-only output)
+      execSync: (cmd) => { retried.push(cmd); return ""; },
+      write: noop,
+      log: noop,
+      logError: noop,
+    });
+    assert.equal(result, true);
+    assert.equal(retried.length, 5, "all 5 steps should be retried");
+  });
+
+  it("returns false when a step fails on retry", () => {
+    let stepCount = 0;
+    const result = updateSource("/fake/dir", {
+      exec: () => null,
+      execSync: () => {
+        stepCount++;
+        if (stepCount === 3) {
+          const err = new Error("npm install failed");
+          err.stderr = Buffer.from("ERR! missing dependency");
+          throw err;
+        }
+        return "";
+      },
+      write: noop,
+      log: noop,
+      logError: noop,
+    });
+    assert.equal(result, false);
+    assert.equal(stepCount, 3, "should fail on the third step");
+  });
+
+  it("handles retry failure without stderr", () => {
+    const errorMsgs = [];
+    const result = updateSource("/fake/dir", {
+      exec: () => null,
+      execSync: () => { throw new Error("generic failure"); },
+      write: noop,
+      log: noop,
+      logError: (s) => errorMsgs.push(s),
+    });
+    assert.equal(result, false);
+    // No stderr message should be logged (stderr is undefined)
+    assert.equal(errorMsgs.length, 0);
+  });
+
+  it("handles retry failure with empty stderr", () => {
+    const errorMsgs = [];
+    const result = updateSource("/fake/dir", {
+      exec: () => null,
+      execSync: () => {
+        const err = new Error("fail");
+        err.stderr = Buffer.from("");
+        throw err;
+      },
+      write: noop,
+      log: noop,
+      logError: (s) => errorMsgs.push(s),
+    });
+    assert.equal(result, false);
+    // Empty stderr should not produce an error log line
+    assert.equal(errorMsgs.length, 0);
+  });
+
+  it("succeeds when some steps use exec and some use execSync", () => {
+    let callCount = 0;
+    const result = updateSource("/fake/dir", {
+      exec: () => {
+        callCount++;
+        // First 2 steps succeed via exec, rest return null
+        return callCount <= 2 ? "ok" : null;
+      },
+      execSync: () => "",
+      write: noop,
+      log: noop,
+      logError: noop,
+    });
+    assert.equal(result, true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// updateGlobal — DI-based tests
+// ---------------------------------------------------------------------------
+
+describe("update — updateGlobal", () => {
+  const noop = () => {};
+
+  it("returns true when exec succeeds on first try", () => {
+    const msgs = [];
+    const result = updateGlobal({
+      exec: () => "installed ok",
+      execSync: () => { throw new Error("should not be called"); },
+      write: (s) => msgs.push(s),
+      log: (s) => msgs.push(s),
+      logError: noop,
+    });
+    assert.equal(result, true);
+    assert.ok(msgs.some((m) => m.includes("Installing latest")));
+    assert.ok(msgs.includes(" done"));
+  });
+
+  it("retries with execSync when exec returns null, and succeeds", () => {
+    let retried = false;
+    const result = updateGlobal({
+      exec: () => null,
+      execSync: () => { retried = true; return ""; },
+      write: noop,
+      log: noop,
+      logError: noop,
+    });
+    assert.equal(result, true);
+    assert.equal(retried, true);
+  });
+
+  it("returns false when retry also fails with stderr", () => {
+    const errorMsgs = [];
+    const result = updateGlobal({
+      exec: () => null,
+      execSync: () => {
+        const err = new Error("npm ERR");
+        err.stderr = Buffer.from("permission denied");
+        throw err;
+      },
+      write: noop,
+      log: noop,
+      logError: (s) => errorMsgs.push(s),
+    });
+    assert.equal(result, false);
+    assert.ok(errorMsgs.some((m) => m.includes("permission denied")));
+  });
+
+  it("returns false when retry fails without stderr", () => {
+    const errorMsgs = [];
+    const result = updateGlobal({
+      exec: () => null,
+      execSync: () => { throw new Error("generic"); },
+      write: noop,
+      log: noop,
+      logError: (s) => errorMsgs.push(s),
+    });
+    assert.equal(result, false);
+    assert.equal(errorMsgs.length, 0);
+  });
+
+  it("returns false when retry fails with empty stderr", () => {
+    const result = updateGlobal({
+      exec: () => null,
+      execSync: () => {
+        const err = new Error("fail");
+        err.stderr = Buffer.from("");
+        throw err;
+      },
+      write: noop,
+      log: noop,
+      logError: noop,
+    });
+    assert.equal(result, false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// verifyUpdate — DI-based tests
+// ---------------------------------------------------------------------------
+
+describe("update — verifyUpdate", () => {
+  it("returns version string when exec succeeds", () => {
+    const result = verifyUpdate({
+      exec: () => "nemoclaw v0.2.0",
+    });
+    assert.equal(result, "nemoclaw v0.2.0");
+  });
+
+  it("returns null when exec returns null", () => {
+    const result = verifyUpdate({
+      exec: () => null,
+    });
+    assert.equal(result, null);
+  });
+
+  it("returns null when exec returns empty string", () => {
+    const result = verifyUpdate({
+      exec: () => "",
+    });
+    assert.equal(result, null);
   });
 });
