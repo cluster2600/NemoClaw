@@ -2394,14 +2394,14 @@ async function setupOpenclaw(sandboxName, model, provider) {
 // ── Step 7: Policy presets ───────────────────────────────────────
 
 // eslint-disable-next-line complexity
-async function _setupPolicies(sandboxName) {
+async function _setupPolicies(sandboxName, provider = null) {
   step(7, 7, "Policy presets");
 
   const suggestions = ["pypi", "npm"];
 
   // Auto-detect local inference — sandbox needs host gateway egress
   const sandbox = registry.getSandbox(sandboxName);
-  const sandboxProvider = sandbox ? sandbox.provider : null;
+  const sandboxProvider = provider || (sandbox ? sandbox.provider : null);
   if (sandboxProvider === "ollama-local" || sandboxProvider === "vllm-local") {
     suggestions.push("local-inference");
     console.log(`  Auto-detected: ${sandboxProvider} → suggesting local-inference preset`);
