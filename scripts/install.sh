@@ -266,12 +266,15 @@ install_openshell
 
 # ── Install NemoClaw CLI ─────────────────────────────────────────
 
+# Use sudo for npm install only when the global prefix directory is not writable
+# by the current user (e.g. system-managed nodesource installs to /usr).
 info "Installing nemoclaw CLI..."
-if [ "$NODE_MGR" = "nodesource" ]; then
-  sudo npm install -g nemoclaw
-else
-  npm install -g nemoclaw
+SUDO=""
+NPM_GLOBAL_PREFIX="$(npm config get prefix 2>/dev/null)" || true
+if [ -n "$NPM_GLOBAL_PREFIX" ] && [ ! -w "$NPM_GLOBAL_PREFIX" ] && [ "$(id -u)" -ne 0 ]; then
+  SUDO="sudo"
 fi
+$SUDO npm install -g nemoclaw
 
 if [ "$NEED_RESHIM" = true ]; then
   info "Reshimming asdf..."

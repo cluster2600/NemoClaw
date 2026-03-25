@@ -129,7 +129,7 @@ remove_file_with_optional_sudo() {
     return 0
   fi
 
-  if [ -w "$path" ] || [ -w "$(dirname "$path")" ]; then
+  if [ -w "$(dirname "$path")" ]; then
     rm -f "$path"
   else
     sudo rm -f "$path"
