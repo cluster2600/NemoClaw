@@ -3,6 +3,7 @@
 //
 // Multi-sandbox registry at ~/.nemoclaw/sandboxes.json
 
+const fs = require("fs");
 const path = require("path");
 const { readConfigFile, writeConfigFile } = require("./config-io");
 

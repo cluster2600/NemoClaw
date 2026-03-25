@@ -16,11 +16,7 @@ function ensureConfigDir(dir) {
     fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
   } catch (err) {
     if (err.code === "EACCES") {
-      throw new ConfigPermissionError(
-        `Cannot create config directory: ${dir}`,
-        dir,
-        err
-      );
+      throw new ConfigPermissionError(`Cannot create config directory: ${dir}`, dir, err);
     }
     throw err;
   }
@@ -33,7 +29,7 @@ function ensureConfigDir(dir) {
       throw new ConfigPermissionError(
         `Config directory exists but is not writable: ${dir}`,
         dir,
-        err
+        err,
       );
     }
     throw err;
@@ -58,13 +54,13 @@ function writeConfigFile(filePath, data) {
     fs.renameSync(tmpFile, filePath);
   } catch (err) {
     // Clean up temp file on failure
-    try { fs.unlinkSync(tmpFile); } catch {}
+    try {
+      fs.unlinkSync(tmpFile);
+    } catch (_e) {
+      /* best effort cleanup */
+    }
     if (err.code === "EACCES") {
-      throw new ConfigPermissionError(
-        `Cannot write config file: ${filePath}`,
-        filePath,
-        err
-      );
+      throw new ConfigPermissionError(`Cannot write config file: ${filePath}`, filePath, err);
     }
     throw err;
   }
@@ -81,11 +77,7 @@ function readConfigFile(filePath, defaultValue) {
     }
   } catch (err) {
     if (err.code === "EACCES") {
-      throw new ConfigPermissionError(
-        `Cannot read config file: ${filePath}`,
-        filePath,
-        err
-      );
+      throw new ConfigPermissionError(`Cannot read config file: ${filePath}`, filePath, err);
     }
     // Corrupt JSON or other non-permission error — return default
   }
@@ -108,7 +100,7 @@ class ConfigPermissionError extends Error {
   }
 }
 
-function buildRemediation(configPath) {
+function buildRemediation(_configPath) {
   const home = process.env.HOME || require("os").homedir();
   const nemoclawDir = path.join(home, ".nemoclaw");
   return [

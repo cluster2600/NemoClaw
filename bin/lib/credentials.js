@@ -56,7 +56,7 @@ function getCredsFile() {
 }
 
 function loadCredentials() {
-  return readConfigFile(CREDS_FILE, {});
+  return readConfigFile(getCredsFile(), {});
 }
 
 function normalizeCredentialValue(value) {
@@ -67,7 +67,7 @@ function normalizeCredentialValue(value) {
 function saveCredential(key, value) {
   const creds = loadCredentials();
   creds[key] = normalizeCredentialValue(value);
-  writeConfigFile(CREDS_FILE, creds);
+  writeConfigFile(getCredsFile(), creds);
 }
 
 function getCredential(key) {
