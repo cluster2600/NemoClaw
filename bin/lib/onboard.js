@@ -2390,7 +2390,7 @@ async function createSandbox(
   // but low enough to prevent a prompt-injected fork bomb from exhausting
   // the host.  Ref: https://github.com/NVIDIA/NemoClaw/issues/809
   const rawPidsLimit = process.env.NEMOCLAW_PIDS_LIMIT || "512";
-  const pidsLimit = /^\d+$/.test(rawPidsLimit) ? rawPidsLimit : "512";
+  const pidsLimit = /^[1-9][0-9]*$/.test(rawPidsLimit) ? rawPidsLimit : "512";
   const dockerUpdate = runCapture(
     `docker update --pids-limit ${pidsLimit} "${sandboxName}" 2>&1`,
     { ignoreError: true }
