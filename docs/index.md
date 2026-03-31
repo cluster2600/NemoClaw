@@ -186,6 +186,16 @@ Task-oriented guides for inference, deployment, and policy management.
 {bdg-secondary}`How-To`
 :::
 
+:::{grid-item-card} Cluster2600 Runtime
+:link: deployment/cluster2600-runtime
+:link-type: doc
+
+Operational notes for the `cluster2600` remote host, including GitHub auth, dashboard recovery, Browserless, and Telegram.
+
++++
+{bdg-secondary}`How-To`
+:::
+
 ::::
 
 ```{toctree}
@@ -232,6 +242,7 @@ Customize the Network Policy <network-policy/customize-network-policy>
 Deploy to a Remote GPU Instance <deployment/deploy-to-remote-gpu>
 Set Up the Telegram Bridge <deployment/set-up-telegram-bridge>
 Sandbox Hardening <deployment/sandbox-hardening>
+Cluster2600 Runtime Notes <deployment/cluster2600-runtime>
 ```
 
 ```{toctree}

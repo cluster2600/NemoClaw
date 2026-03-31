@@ -195,6 +195,8 @@ The blueprint lifecycle follows four stages: resolve the artifact, verify its di
 
 When something goes wrong, errors may originate from either NemoClaw or the OpenShell layer underneath. Run `nemoclaw <name> status` for NemoClaw-level health and `openshell sandbox list` to check the underlying sandbox state.
 
+For a concrete remote-host deployment example, refer to [Cluster2600 Runtime Notes](docs/deployment/cluster2600-runtime.md). It documents the `cluster2600` host topology, GitHub provider flow, dashboard exposure, Browserless, Telegram bridge, and recovery commands used for a real NemoClaw environment.
+
 ---
 
 ## Inference
