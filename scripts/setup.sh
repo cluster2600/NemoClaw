@@ -59,6 +59,105 @@ upsert_provider() {
   fi
 }
 
+provider_exists() {
+  openshell provider get "$1" >/dev/null 2>&1
+}
+
+resolve_github_token() {
+  if [ -n "${GH_TOKEN:-}" ]; then
+    printf '%s' "$GH_TOKEN"
+    return 0
+  fi
+
+  if [ -n "${GITHUB_TOKEN:-}" ]; then
+    printf '%s' "$GITHUB_TOKEN"
+    return 0
+  fi
+
+  if [ -f "${HOME}/.nemoclaw/credentials.json" ] && command -v python3 >/dev/null 2>&1; then
+    local file_token
+    file_token="$(
+      python3 - <<'PY'
+import json
+import os
+
+path = os.path.expanduser("~/.nemoclaw/credentials.json")
+try:
+    with open(path, "r", encoding="utf-8") as handle:
+        data = json.load(handle)
+except Exception:
+    raise SystemExit(0)
+
+token = data.get("GH_TOKEN") or data.get("GITHUB_TOKEN") or ""
+if token:
+    print(token, end="")
+PY
+    )"
+    if [ -n "$file_token" ]; then
+      printf '%s' "$file_token"
+      return 0
+    fi
+  fi
+
+  if command -v gh >/dev/null 2>&1; then
+    local gh_token
+    gh_token="$(GH_PROMPT_DISABLED=1 gh auth token 2>/dev/null || true)"
+    if [ -n "$gh_token" ]; then
+      printf '%s' "$gh_token"
+      return 0
+    fi
+  fi
+
+  return 1
+}
+
+ensure_github_provider() {
+  local token basic_auth create_output create_rc
+  token="$(resolve_github_token || true)"
+
+  if [ -z "$token" ]; then
+    if provider_exists github; then
+      info "Using existing github provider"
+      return 0
+    fi
+    warn "No GitHub host credential found; sandbox GitHub auth will stay disabled"
+    return 1
+  fi
+
+  basic_auth="$(printf 'x-access-token:%s' "$token" | base64 | tr -d '\n')"
+
+  set +e
+  create_output="$(
+    GH_TOKEN="$token" \
+      GITHUB_TOKEN="$token" \
+      GITHUB_BASIC_AUTH="$basic_auth" \
+      openshell provider create --name github --type github \
+      --credential GH_TOKEN \
+      --credential GITHUB_TOKEN \
+      --credential GITHUB_BASIC_AUTH 2>&1
+  )"
+  create_rc=$?
+  set -e
+
+  if [ "$create_rc" -eq 0 ]; then
+    info "Created github provider"
+  elif printf '%s' "$create_output" | grep -q "AlreadyExists"; then
+    GH_TOKEN="$token" \
+      GITHUB_TOKEN="$token" \
+      GITHUB_BASIC_AUTH="$basic_auth" \
+      openshell provider update github \
+      --credential GH_TOKEN \
+      --credential GITHUB_TOKEN \
+      --credential GITHUB_BASIC_AUTH >/dev/null
+    info "Updated github provider"
+  else
+    warn "Failed to configure github provider: ${create_output}"
+    return 1
+  fi
+
+  return 0
+}
+
 # Resolve DOCKER_HOST for macOS user-scoped runtimes when needed.
 ORIGINAL_DOCKER_HOST="${DOCKER_HOST:-}"
 if docker_host="$(detect_docker_host)"; then
@@ -188,6 +287,12 @@ fi
 info "Setting inference route to nvidia-nim / Nemotron 3 Super..."
 openshell inference set --no-verify --provider nvidia-nim --model nvidia/nemotron-3-super-120b-a12b >/dev/null 2>&1
 
+SANDBOX_PROVIDERS=(--provider nvidia-nim)
+if ensure_github_provider; then
+  SANDBOX_PROVIDERS+=(--provider github)
+  info "GitHub provider will be attached to the sandbox"
+fi
+
 # 5. Build and create sandbox
 info "Deleting old ${SANDBOX_NAME} sandbox (if any)..."
 openshell sandbox delete "$SANDBOX_NAME" >/dev/null 2>&1 || true
@@ -210,7 +315,8 @@ set +e
 # NVIDIA_API_KEY is NOT passed into the sandbox. Inference is proxied through
 # the OpenShell gateway which injects the stored credential server-side.
 openshell sandbox create --from "$BUILD_CTX/Dockerfile" --name "$SANDBOX_NAME" \
-  --provider nvidia-nim \
+  "${SANDBOX_PROVIDERS[@]}" \
+  -- env nemoclaw-start \
   >"$CREATE_LOG" 2>&1
 CREATE_RC=$?
 set -e

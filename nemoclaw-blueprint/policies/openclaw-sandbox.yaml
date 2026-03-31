@@ -95,9 +95,22 @@ network_policies:
       - host: api.github.com
         port: 443
         access: full
+      - host: raw.githubusercontent.com
+        port: 443
+        access: full
+      - host: codeload.github.com
+        port: 443
+        access: full
+      - host: objects.githubusercontent.com
+        port: 443
+        access: full
+      - host: uploads.github.com
+        port: 443
+        access: full
     binaries:
       - { path: /usr/bin/gh }
       - { path: /usr/bin/git }
+      - { path: /usr/lib/git-core/git-remote-https }
 
   # ── OpenClaw "phone home" ────────────────────────────────────────────
   # Minimum viable set for OpenClaw to authenticate, discover plugins,

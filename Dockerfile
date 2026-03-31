@@ -22,9 +22,14 @@ RUN npm install && npm run build
 FROM ${BASE_IMAGE}
 
 # Harden: remove unnecessary build tools and network probes from base image (#830)
+# Install GitHub CLI in the runtime image so provider-backed gh access works in
+# freshly rebuilt sandboxes even if the cached base image predates gh support.
 RUN (apt-get remove --purge -y gcc gcc-12 g++ g++-12 cpp cpp-12 make \
         netcat-openbsd netcat-traditional ncat 2>/dev/null || true) \
     && apt-get autoremove --purge -y \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+        gh=2.23.0+dfsg1-1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy built plugin and blueprint into the sandbox

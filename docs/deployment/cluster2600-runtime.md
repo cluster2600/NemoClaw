@@ -56,13 +56,12 @@ flowchart TB
             GW["OpenShell gateway\nhttps://127.0.0.1:8080"]
             GHProv["Provider: github"]
             INFProv["Provider: nvidia-devstral"]
+            Inference["inference.local\nhttps://inference.local/v1"]
             Policy["Sandbox policy"]
 
             subgraph Sandbox["Hosted sandbox: nemoclaw"]
                 Entry["nemoclaw-start"]
                 OC["openclaw gateway run"]
-                DDG["ddg-local-proxy.mjs"]
-                Compat["inference-compat-proxy.py"]
                 Git["git + gh"]
             end
         end
@@ -72,16 +71,17 @@ flowchart TB
     Repo --> Sandbox
     GHProv --> GW
     INFProv --> GW
+    GW --> Inference
     Policy --> Sandbox
     GW --> Sandbox
     Entry --> OC
-    Entry --> DDG
-    Entry --> Compat
+    GHProv --> Git
+    Inference --> OC
     OC --> Tunnel
     Tunnel --> Tok
     Browserless -. host-side browser .- OC
     Tg -. chat bridge .- OC
-    Git --> GW
+    Git --> Repo
 ```
 
 ## Security Model Used on This Host
@@ -279,16 +279,14 @@ The main repository files changed for this `cluster2600` deployment were:
 - `Dockerfile`
 - `Dockerfile.base`
 - `bin/lib/onboard.js`
+- `docs/deployment/cluster2600-runtime.md`
+- `nemoclaw-blueprint/policies/openclaw-sandbox.yaml`
 - `package.json`
 - `package-lock.json`
-- `policy/sandbox-policy.yaml`
-- `scripts/ddg-local-proxy.mjs`
-- `scripts/inference-compat-proxy.py`
 - `scripts/nemoclaw-start.sh`
 - `scripts/setup.sh`
-- `vendor/`
 
-Those changes should be read together: the image, startup, policy, and OpenClaw runtime patches were all required to make the remote environment behave consistently.
+Those changes should be read together: the image, startup, policy, GitHub provider wiring, and OpenClaw runtime updates were all required to make the remote environment behave consistently on the documented `inference.local` path.
 
 ## Known Caveats
 
