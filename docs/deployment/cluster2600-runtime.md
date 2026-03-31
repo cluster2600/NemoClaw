@@ -25,7 +25,7 @@ It captures the operational changes made to get OpenClaw, GitHub access, Browser
 
 ## Scope
 
-These notes cover the `cluster2600` host at `192.168.1.109`, the `openshell` gateway running on that host, and the `nemoclaw` sandbox rebuilt from this repository.
+These notes cover the `cluster2600` host at `192.168.1.109`, where the OpenShell runtime hosts the `nemoclaw` sandbox rebuilt from this repository and mediates provider routing, policy enforcement, and sandbox access.
 
 The main outcomes were:
 
@@ -37,6 +37,8 @@ The main outcomes were:
 
 ## Runtime Topology
 
+In this deployment, OpenShell is the host runtime. `nemoclaw` is the OpenShell-hosted sandbox environment that runs OpenClaw and the helper processes described below.
+
 ```mermaid
 flowchart TB
     subgraph Laptop["Operator laptop"]
@@ -44,27 +46,34 @@ flowchart TB
     end
 
     subgraph Host["cluster2600 host"]
-        GW["OpenShell gateway\nhttps://127.0.0.1:8080"]
-        Repo["~/.nemoclaw/source"]
+        Repo["~/.nemoclaw/source\nDockerfile + scripts + policy"]
         Tok["~/Desktop/openclaw-gateway-token.txt"]
         Browserless["browserless Docker\n127.0.0.1:3000"]
         Tg["Telegram bridge"]
         Tunnel["host SSH tunnel\n127.0.0.1:18789"]
-        GHProv["OpenShell provider: github"]
-    end
 
-    subgraph Sandbox["nemoclaw sandbox"]
-        Entry["nemoclaw-start"]
-        OC["openclaw gateway run"]
-        DDG["ddg-local-proxy.mjs"]
-        Compat["inference-compat-proxy.py"]
-        Git["git + gh"]
+        subgraph OpenShell["OpenShell runtime on host"]
+            GW["OpenShell gateway\nhttps://127.0.0.1:8080"]
+            GHProv["Provider: github"]
+            INFProv["Provider: nvidia-devstral"]
+            Policy["Sandbox policy"]
+
+            subgraph Sandbox["Hosted sandbox: nemoclaw"]
+                Entry["nemoclaw-start"]
+                OC["openclaw gateway run"]
+                DDG["ddg-local-proxy.mjs"]
+                Compat["inference-compat-proxy.py"]
+                Git["git + gh"]
+            end
+        end
     end
 
     SSH --> Host
-    Repo --> Entry
-    GW --> Sandbox
+    Repo --> Sandbox
     GHProv --> GW
+    INFProv --> GW
+    Policy --> Sandbox
+    GW --> Sandbox
     Entry --> OC
     Entry --> DDG
     Entry --> Compat
@@ -156,7 +165,7 @@ The host and sandbox now use this pattern:
 
 1. the host authenticates `gh`
 2. the host creates or updates the OpenShell `github` provider
-3. sandbox creation attaches `--provider github`
+3. sandbox creation attaches `--provider github`, so OpenShell exposes placeholder credentials into the hosted sandbox
 4. `gh` reads placeholder env vars inside the sandbox
 5. `git` reads `/sandbox/.gitconfig` for the GitHub HTTPS auth header
 
