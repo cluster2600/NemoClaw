@@ -37,7 +37,7 @@ The main outcomes were:
 
 ## Runtime Topology
 
-```{mermaid}
+```mermaid
 flowchart TB
     subgraph Laptop["Operator laptop"]
         SSH["ssh cluster2600@192.168.1.109"]
@@ -93,7 +93,7 @@ For GitHub, the host provider was populated with three credential keys:
 `GITHUB_BASIC_AUTH` is the base64-encoded `x-access-token:<token>` form needed by GitHub HTTPS git traffic.
 Inside the sandbox, those values appear only as placeholders and are rewritten by OpenShell on the outbound path.
 
-```{mermaid}
+```mermaid
 sequenceDiagram
     participant Host as cluster2600 host
     participant Provider as OpenShell github provider
@@ -183,7 +183,7 @@ The tokenized URLs are written to:
 
 This file is rewritten whenever the sandbox is recreated because the gateway token changes on each fresh OpenClaw config.
 
-```{mermaid}
+```mermaid
 flowchart LR
     Sandbox["nemoclaw sandbox\n127.0.0.1:18789"]
     SSHCfg["openshell sandbox ssh-config nemoclaw"]
