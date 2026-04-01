@@ -118,9 +118,19 @@ path = os.path.expanduser('~/.openclaw/openclaw.json'); \
 json.dump(config, open(path, 'w'), indent=2); \
 os.chmod(path, 0o600)"
 
-# Install NemoClaw plugin into OpenClaw
-RUN openclaw doctor --fix > /dev/null 2>&1 || true \
-    && openclaw plugins install /opt/nemoclaw > /dev/null 2>&1 || true
+# Install NemoClaw plugin into OpenClaw.
+# OpenClaw installs extensions under the state directory. In the sandbox image,
+# ~/.openclaw/extensions is a symlink to /sandbox/.openclaw-data/extensions, and
+# the installer rejects symlinked install roots. Point the install at the real
+# state directory while still persisting plugin metadata into the canonical
+# openclaw.json before it is locked down.
+RUN mkdir -p /sandbox/.openclaw-data/extensions \
+    && OPENCLAW_STATE_DIR=/sandbox/.openclaw-data \
+       OPENCLAW_CONFIG_PATH=/sandbox/.openclaw/openclaw.json \
+       openclaw doctor --fix > /dev/null 2>&1 || true \
+    && OPENCLAW_STATE_DIR=/sandbox/.openclaw-data \
+       OPENCLAW_CONFIG_PATH=/sandbox/.openclaw/openclaw.json \
+       openclaw plugins install /opt/nemoclaw > /dev/null 2>&1
 
 # Lock openclaw.json via DAC: chown to root so the sandbox user cannot modify
 # it at runtime.  This works regardless of Landlock enforcement status.

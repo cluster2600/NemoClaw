@@ -12,6 +12,7 @@
  */
 
 import { handleSlashCommand } from "./commands/slash.js";
+import { evaluateMemorySecretGuard } from "./memory-secret-guard.js";
 import {
   describeOnboardEndpoint,
   describeOnboardProvider,
@@ -247,6 +248,28 @@ export default function register(api: OpenClawPluginApi): void {
   const onboardCfg = loadOnboardConfig();
   const providerCredentialEnv = onboardCfg?.credentialEnv ?? "NVIDIA_API_KEY";
   api.registerProvider(registeredProviderForConfig(onboardCfg, providerCredentialEnv));
+
+  api.on("before_tool_call", (event) => {
+    if (!event || typeof event !== "object") {
+      return;
+    }
+    const toolEvent = event as { toolName?: unknown; params?: unknown };
+    if (typeof toolEvent.toolName !== "string") {
+      return;
+    }
+    const toolParams =
+      typeof toolEvent.params === "object" &&
+      toolEvent.params !== null &&
+      !Array.isArray(toolEvent.params)
+        ? (toolEvent.params as Record<string, unknown>)
+        : {};
+    return evaluateMemorySecretGuard({
+      toolName: toolEvent.toolName,
+      toolParams,
+      config: api.config,
+      resolvePath: api.resolvePath,
+    });
+  });
 
   const bannerEndpoint = onboardCfg ? describeOnboardEndpoint(onboardCfg) : "build.nvidia.com";
   const bannerProvider = onboardCfg ? describeOnboardProvider(onboardCfg) : "NVIDIA Endpoints";

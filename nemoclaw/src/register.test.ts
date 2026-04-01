@@ -12,6 +12,12 @@ vi.mock("./onboard/config.js", () => ({
 
 import register, { getPluginConfig } from "./index.js";
 import { loadOnboardConfig } from "./onboard/config.js";
+import {
+  evaluateMemorySecretGuard,
+  isProtectedMemoryPath,
+  resolveWorkspaceDir,
+  scanForMemorySecrets,
+} from "./memory-secret-guard.js";
 
 const mockedLoadOnboardConfig = vi.mocked(loadOnboardConfig);
 
@@ -54,6 +60,12 @@ describe("plugin registration", () => {
     expect(api.registerProvider).toHaveBeenCalledWith(expect.objectContaining({ id: "inference" }));
   });
 
+  it("registers a before_tool_call hook for persistent memory writes", () => {
+    const api = createMockApi();
+    register(api);
+    expect(api.on).toHaveBeenCalledWith("before_tool_call", expect.any(Function));
+  });
+
   it("does NOT register CLI commands", () => {
     const api = createMockApi();
     // registerCli should not exist on the API interface after removal
@@ -76,6 +88,118 @@ describe("plugin registration", () => {
     expect(providerArg.models?.chat).toEqual([
       expect.objectContaining({ id: "inference/nvidia/custom-model" }),
     ]);
+  });
+
+  it("blocks likely secrets from being written into persistent memory", () => {
+    const api = createMockApi();
+    register(api);
+
+    const hook = vi
+      .mocked(api.on)
+      .mock.calls.find(([hookName]) => hookName === "before_tool_call")?.[1];
+    expect(hook).toBeTypeOf("function");
+
+    const result = (hook as (event: unknown) => unknown)({
+      toolName: "Write",
+      params: {
+        file_path: "/sandbox/.openclaw/workspace/MEMORY.md",
+        content: "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+      },
+    });
+
+    expect(result).toEqual({
+      block: true,
+      blockReason: expect.stringContaining("GitHub token"),
+    });
+  });
+});
+
+describe("memory secret guard", () => {
+  it("uses the default workspace path when no workspace is configured", () => {
+    expect(resolveWorkspaceDir({})).toBe("/sandbox/.openclaw/workspace");
+  });
+
+  it("uses the configured workspace path when one is provided", () => {
+    expect(
+      resolveWorkspaceDir({
+        agents: {
+          defaults: {
+            workspace: "/sandbox/custom-workspace",
+          },
+        },
+      }),
+    ).toBe("/sandbox/custom-workspace");
+  });
+
+  it("protects MEMORY.md and daily memory files only", () => {
+    expect(
+      isProtectedMemoryPath(
+        "/sandbox/.openclaw/workspace/MEMORY.md",
+        "/sandbox/.openclaw/workspace",
+      ),
+    ).toBe(true);
+    expect(
+      isProtectedMemoryPath(
+        "/sandbox/.openclaw/workspace/memory/2026-04-01.md",
+        "/sandbox/.openclaw/workspace",
+      ),
+    ).toBe(true);
+    expect(
+      isProtectedMemoryPath("/sandbox/.openclaw/workspace/USER.md", "/sandbox/.openclaw/workspace"),
+    ).toBe(false);
+    expect(isProtectedMemoryPath("/tmp/random.md", "/sandbox/.openclaw/workspace")).toBe(false);
+  });
+
+  it("detects high-confidence GitHub tokens", () => {
+    expect(scanForMemorySecrets("ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA")).toEqual([
+      {
+        ruleId: "github-pat",
+        label: "GitHub token",
+      },
+    ]);
+  });
+
+  it("allows non-secret writes into MEMORY.md", () => {
+    expect(
+      evaluateMemorySecretGuard({
+        toolName: "write",
+        toolParams: {
+          file_path: "/sandbox/.openclaw/workspace/MEMORY.md",
+          content: "Remember to check the nightly build in the morning.",
+        },
+        config: {},
+      }),
+    ).toBeUndefined();
+  });
+
+  it("ignores writes outside persistent memory", () => {
+    expect(
+      evaluateMemorySecretGuard({
+        toolName: "write",
+        toolParams: {
+          file_path: "/sandbox/.openclaw/workspace/USER.md",
+          content: "ghp_AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        },
+        config: {},
+      }),
+    ).toBeUndefined();
+  });
+
+  it("blocks edits that add a private key to daily memory", () => {
+    const result = evaluateMemorySecretGuard({
+      toolName: "edit",
+      toolParams: {
+        file_path: "/sandbox/.openclaw/workspace/memory/2026-04-01.md",
+        new_string:
+          "-----BEGIN PRIVATE KEY-----\nAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA\n-----END PRIVATE KEY-----",
+      },
+      config: {},
+    });
+
+    expect(result).toEqual({
+      block: true,
+      blockReason: expect.stringContaining("Private key"),
+    });
   });
 });
 
