@@ -40,7 +40,7 @@ const SECRET_RULES: SecretRule[] = [
   {
     id: "anthropic-api-key",
     label: "Anthropic API key",
-    pattern: /\bsk-ant-api03-[A-Za-z0-9_-]{20,}AA(?:[\s'"`;"]|$)/,
+    pattern: /(?<![A-Za-z0-9_-])sk-ant-api03-[A-Za-z0-9_-]{80,128}(?![A-Za-z0-9_-])/,
   },
   {
     id: "openai-api-key",

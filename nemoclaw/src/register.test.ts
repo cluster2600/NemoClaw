@@ -201,6 +201,29 @@ describe("memory secret guard", () => {
       blockReason: expect.stringContaining("Private key"),
     });
   });
+
+  it("blocks multiedit writes that add an Anthropic key to persistent memory", () => {
+    const anthropicKey = `sk-ant-api03-${"A".repeat(100)}`;
+
+    const result = evaluateMemorySecretGuard({
+      toolName: "multiedit",
+      toolParams: {
+        file_path: "/sandbox/.openclaw/workspace/memory/2026-04-01.md",
+        edits: [
+          {
+            old_string: "TODO",
+            new_string: `Remember this token: ${anthropicKey}`,
+          },
+        ],
+      },
+      config: {},
+    });
+
+    expect(result).toEqual({
+      block: true,
+      blockReason: expect.stringContaining("Anthropic API key"),
+    });
+  });
 });
 
 describe("getPluginConfig", () => {
