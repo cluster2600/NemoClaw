@@ -29,6 +29,12 @@ fi
 # into commands executed by the entrypoint or auto-pair watcher.
 export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
+# Ensure Git inside the sandbox trusts the OpenShell CA bundle.
+if [ -f /etc/openshell-tls/ca-bundle.pem ]; then
+  export GIT_SSL_CAINFO=/etc/openshell-tls/ca-bundle.pem
+  export SSL_CERT_FILE=/etc/openshell-tls/ca-bundle.pem
+fi
+
 # ── Drop unnecessary Linux capabilities ──────────────────────────
 # CIS Docker Benchmark 5.3: containers should not run with default caps.
 # OpenShell manages the container runtime so we cannot pass --cap-drop=ALL
@@ -104,6 +110,39 @@ json.dump({
 }, open(path, 'w'))
 os.chmod(path, 0o600)
 PYAUTH
+}
+
+configure_github_cli_auth() {
+  local script
+
+  if ! command -v git >/dev/null 2>&1; then
+    return
+  fi
+
+  script='
+set -e
+gitconfig="${HOME}/.gitconfig"
+mkdir -p "$(dirname "$gitconfig")"
+touch "$gitconfig"
+git config --file "$gitconfig" http.sslCAInfo /etc/openshell-tls/ca-bundle.pem >/dev/null 2>&1 || true
+git config --file "$gitconfig" --unset-all http.https://github.com/.extraheader >/dev/null 2>&1 || true
+git config --file "$gitconfig" --unset-all http.https://gist.github.com/.extraheader >/dev/null 2>&1 || true
+if [ -n "${GITHUB_BASIC_AUTH:-}" ]; then
+  git config --file "$gitconfig" http.https://github.com/.extraheader "Authorization: Basic ${GITHUB_BASIC_AUTH}"
+  git config --file "$gitconfig" http.https://gist.github.com/.extraheader "Authorization: Basic ${GITHUB_BASIC_AUTH}"
+  git config --file "$gitconfig" --add http.https://github.com/.extraheader "Connection: close"
+fi
+'
+
+  if [ "$(id -u)" -eq 0 ]; then
+    gosu sandbox env HOME=/sandbox GITHUB_BASIC_AUTH="${GITHUB_BASIC_AUTH:-}" bash -lc "$script"
+  else
+    HOME=/sandbox GITHUB_BASIC_AUTH="${GITHUB_BASIC_AUTH:-}" bash -lc "$script"
+  fi
+
+  if [ -n "${GH_TOKEN:-${GITHUB_TOKEN:-}}" ]; then
+    echo "[gateway] GitHub CLI auth configured through OpenShell provider env"
+  fi
 }
 
 print_dashboard_urls() {
@@ -222,6 +261,7 @@ if [ "$(id -u)" -ne 0 ]; then
     echo "[SECURITY WARNING] Config integrity check failed — proceeding anyway (non-root mode)"
   fi
   write_auth_profile
+  configure_github_cli_auth
 
   if [ ${#NEMOCLAW_CMD[@]} -gt 0 ]; then
     exec "${NEMOCLAW_CMD[@]}"
@@ -253,6 +293,7 @@ verify_config_integrity
 
 # Write auth profile as sandbox user (needs writable .openclaw-data)
 gosu sandbox bash -c "$(declare -f write_auth_profile); write_auth_profile"
+configure_github_cli_auth
 
 # If a command was passed (e.g., "openclaw agent ..."), run it as sandbox user
 if [ ${#NEMOCLAW_CMD[@]} -gt 0 ]; then
