@@ -16,6 +16,8 @@ network_policies:
         port: 443
         access: full
     binaries:
+      - { path: /usr/local/bin/openclaw }
+      - { path: /usr/local/bin/claude }
       - { path: /usr/bin/python3* }
       - { path: /usr/bin/pip* }
       - { path: /usr/local/bin/python3* }
